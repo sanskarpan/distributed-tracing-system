@@ -1,7 +1,7 @@
 package api
 
 import (
-	"fmt"
+	"context"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,10 +24,21 @@ type Pipeline struct {
 	sseBus    *SSEBus
 	analyzer  *analysis.Analyzer
 
+	// Worker pool
+	workCh chan *model.Span
+	quit   chan struct{} // closed on shutdown; never closed workCh to avoid send-to-closed-channel panics
+	wg     sync.WaitGroup
+
 	// Stats
 	sampledTotal int64
 	droppedTotal int64
 }
+
+// workerCount is the number of parallel span-processing goroutines.
+const workerCount = 4
+
+// workerQueueDepth is the capacity of the span work queue.
+const workerQueueDepth = 1024
 
 func NewPipeline(store storage.TraceStore, metricsStore *metrics.MetricsStore,
 	sseBus *SSEBus, s sampler.Sampler, analyzer *analysis.Analyzer, assemblerTimeout ...time.Duration) *Pipeline {
@@ -44,6 +55,8 @@ func NewPipeline(store storage.TraceStore, metricsStore *metrics.MetricsStore,
 		metrics:  metricsStore,
 		sseBus:   sseBus,
 		analyzer: analyzer,
+		workCh:   make(chan *model.Span, workerQueueDepth),
+		quit:     make(chan struct{}),
 	}
 
 	p.assembler = processor.NewAssembler(timeout, func(trace *model.Trace) {
@@ -62,7 +75,34 @@ func NewPipeline(store storage.TraceStore, metricsStore *metrics.MetricsStore,
 		sseBus.Broadcast(SSEEvent{Type: "trace", Data: summary})
 	})
 
+	// Start worker pool
+	for i := 0; i < workerCount; i++ {
+		p.wg.Add(1)
+		go func() {
+			defer p.wg.Done()
+			for {
+				select {
+				case span := <-p.workCh:
+					p.processSpan(span)
+				case <-p.quit:
+					return
+				}
+			}
+		}()
+	}
+
 	return p
+}
+
+// StartWithContext wires the worker pool shutdown to context cancellation.
+// It closes p.quit (not p.workCh) so in-flight sends in IngestSpans never
+// hit a "send on closed channel" panic.
+func (p *Pipeline) StartWithContext(ctx context.Context) {
+	go func() {
+		<-ctx.Done()
+		close(p.quit)
+		p.wg.Wait()
+	}()
 }
 
 // IngestSpans validates, samples, enriches, and assembles spans.
@@ -106,7 +146,15 @@ func (p *Pipeline) IngestSpans(spans []*model.Span) (accepted, dropped int, err 
 			continue
 		}
 
-		p.processSpan(span)
+		// Submit to worker pool; fall back to inline if queue full or shutting down.
+		// workCh is never closed so sends cannot panic.
+		select {
+		case p.workCh <- span:
+		case <-p.quit:
+			p.processSpan(span)
+		default:
+			p.processSpan(span)
+		}
 		accepted++
 	}
 	return
@@ -143,6 +191,11 @@ func (p *Pipeline) GetSampler() sampler.Sampler {
 // Stats returns sampling statistics.
 func (p *Pipeline) Stats() (sampled, dropped int64) {
 	return atomic.LoadInt64(&p.sampledTotal), atomic.LoadInt64(&p.droppedTotal)
+}
+
+// QueueDepth returns the number of spans currently waiting in the worker pool queue.
+func (p *Pipeline) QueueDepth() int {
+	return len(p.workCh)
 }
 
 type spanSSE struct {
@@ -208,4 +261,3 @@ func traceToSummarySSE(t *model.Trace) traceSSE {
 	}
 }
 
-var _ = fmt.Sprintf // avoid unused import
