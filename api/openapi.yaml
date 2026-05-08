@@ -1,0 +1,412 @@
+openapi: "3.1.0"
+info:
+  title: Distributed Tracing System API
+  version: "1.0.0"
+  description: |
+    Collector and query API for the Distributed Tracing System.
+    Supports native span ingest, OTLP HTTP/JSON, Zipkin v2 JSON, RED metrics,
+    anomaly detection, SLO tracking, and live Server-Sent Events.
+
+servers:
+  - url: http://localhost:4318
+    description: Local collector
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  schemas:
+    AttributeDTO:
+      type: object
+      properties:
+        key:         { type: string }
+        stringValue: { type: string }
+        intValue:    { type: integer, format: int64 }
+        boolValue:   { type: boolean }
+        doubleValue: { type: number, format: double }
+
+    StatusDTO:
+      type: object
+      properties:
+        code:    { type: integer, description: "0=unset 1=ok 2=error" }
+        message: { type: string }
+
+    SpanDTO:
+      type: object
+      required: [traceId, spanId, name, serviceName]
+      properties:
+        traceId:      { type: string }
+        spanId:       { type: string }
+        parentSpanId: { type: string }
+        name:         { type: string }
+        serviceName:  { type: string }
+        kind:         { type: integer, description: "0=unspecified 1=internal 2=server 3=client 4=producer 5=consumer" }
+        startTimeUnixNano: { type: integer, format: int64 }
+        endTimeUnixNano:   { type: integer, format: int64 }
+        status:       { $ref: '#/components/schemas/StatusDTO' }
+        attributes:   { type: array, items: { $ref: '#/components/schemas/AttributeDTO' } }
+
+    TraceSummaryDTO:
+      type: object
+      properties:
+        traceId:     { type: string }
+        rootService: { type: string }
+        rootOp:      { type: string }
+        durationMs:  { type: number }
+        spanCount:   { type: integer }
+        services:    { type: array, items: { type: string } }
+        hasError:    { type: boolean }
+        receivedAt:  { type: string, format: date-time }
+
+    TraceListResponse:
+      type: object
+      properties:
+        traces:  { type: array, items: { $ref: '#/components/schemas/TraceSummaryDTO' } }
+        total:   { type: integer }
+        hasMore: { type: boolean }
+
+    MetricSnapshotDTO:
+      type: object
+      properties:
+        service:   { type: string }
+        operation: { type: string }
+        rate:      { type: number, description: "requests/sec" }
+        errorRate: { type: number, description: "fraction 0–1" }
+        p50Ms:     { type: number }
+        p95Ms:     { type: number }
+        p99Ms:     { type: number }
+
+    AnomalyResult:
+      type: object
+      properties:
+        service:   { type: string }
+        operation: { type: string }
+        p99Ms:     { type: number }
+        meanMs:    { type: number }
+        stddevMs:  { type: number }
+        zScore:    { type: number }
+        isOutlier: { type: boolean }
+
+    SLOResult:
+      type: object
+      properties:
+        service:          { type: string }
+        targetErrorRate:  { type: number }
+        currentErrorRate: { type: number }
+        budgetRemaining:  { type: number }
+        breached:         { type: boolean }
+
+    SamplerConfig:
+      type: object
+      properties:
+        type:   { type: string, enum: [always, never, probabilistic, tail] }
+        config: { type: object }
+        stats:
+          type: object
+          properties:
+            sampledTotal: { type: integer }
+            droppedTotal: { type: integer }
+            samplingRate: { type: number }
+
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe
+      security: []
+      responses:
+        "200":
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+
+  /readyz:
+    get:
+      summary: Readiness probe
+      security: []
+      responses:
+        "200":
+          description: Collector is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:     { type: string }
+                  uptimeSec:  { type: number }
+                  goroutines: { type: integer }
+                  heapMB:     { type: integer }
+
+  /metrics:
+    get:
+      summary: Prometheus self-observability metrics
+      security: []
+      responses:
+        "200":
+          description: Prometheus text exposition format
+
+  /api/v1/config:
+    get:
+      summary: Frontend configuration
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logLinkTemplate: { type: string }
+
+  /api/v1/stats:
+    get:
+      summary: Collector statistics
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sampledTotal:     { type: integer }
+                  droppedTotal:     { type: integer }
+                  workerQueueDepth: { type: integer }
+                  traceCount:       { type: integer }
+                  maxTraces:        { type: integer }
+
+  /api/v1/spans:
+    post:
+      summary: Ingest spans (native JSON format)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                spans:
+                  type: array
+                  items: { $ref: '#/components/schemas/SpanDTO' }
+      responses:
+        "202": { description: Accepted }
+
+  /v1/traces:
+    post:
+      summary: Ingest traces (OTLP HTTP/JSON)
+      responses:
+        "202": { description: Accepted }
+
+  /api/v2/spans:
+    post:
+      summary: Ingest spans (Zipkin v2 JSON)
+      responses:
+        "202": { description: Accepted }
+
+  /api/v1/traces:
+    get:
+      summary: List / search traces
+      parameters:
+        - { name: service,    in: query, schema: { type: string } }
+        - { name: operation,  in: query, schema: { type: string } }
+        - { name: attr,       in: query, schema: { type: string }, description: "key=value attribute filter" }
+        - { name: status,     in: query, schema: { type: string, enum: [error] } }
+        - { name: minDuration,in: query, schema: { type: integer }, description: "milliseconds" }
+        - { name: maxDuration,in: query, schema: { type: integer } }
+        - { name: startTime,  in: query, schema: { type: integer }, description: "unix milliseconds" }
+        - { name: endTime,    in: query, schema: { type: integer } }
+        - { name: limit,      in: query, schema: { type: integer, default: 20 } }
+        - { name: offset,     in: query, schema: { type: integer, default: 0 } }
+        - { name: sortBy,     in: query, schema: { type: string, enum: [receivedAt, duration, spanCount] } }
+        - { name: sortDesc,   in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TraceListResponse' }
+
+  /api/v1/traces/compare:
+    get:
+      summary: Compare two traces
+      parameters:
+        - { name: base,    in: query, required: true,  schema: { type: string } }
+        - { name: compare, in: query, required: true,  schema: { type: string } }
+      responses:
+        "200": { description: Comparison result }
+
+  /api/v1/traces/{traceId}:
+    get:
+      summary: Get trace detail
+      parameters:
+        - { name: traceId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Full trace with spans }
+        "404": { description: Not found }
+
+  /api/v1/traces/{traceId}/export:
+    get:
+      summary: Export trace as JSON file
+      parameters:
+        - { name: traceId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Downloadable JSON
+          headers:
+            Content-Disposition: { schema: { type: string } }
+
+  /api/v1/services:
+    get:
+      summary: List all known services
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  services: { type: array, items: { type: string } }
+
+  /api/v1/operations:
+    get:
+      summary: List operations for a service
+      parameters:
+        - { name: service, in: query, schema: { type: string } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  operations: { type: array, items: { type: string } }
+
+  /api/v1/dependencies:
+    get:
+      summary: Service dependency graph
+      responses:
+        "200": { description: Dependency graph with nodes and edges }
+
+  /api/v1/metrics/red:
+    get:
+      summary: RED metrics per service/operation
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  metrics:
+                    type: array
+                    items: { $ref: '#/components/schemas/MetricSnapshotDTO' }
+
+  /api/v1/metrics/heatmap:
+    get:
+      summary: 2D latency heatmap (time × latency bucket)
+      parameters:
+        - { name: service, in: query, schema: { type: string } }
+      responses:
+        "200": { description: Heatmap data with time buckets and latency counts }
+
+  /api/v1/metrics/anomalies:
+    get:
+      summary: Latency anomaly detection
+      parameters:
+        - { name: z, in: query, schema: { type: number, default: 2.0 }, description: "z-score threshold" }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  anomalies:  { type: array, items: { $ref: '#/components/schemas/AnomalyResult' } }
+                  zThreshold: { type: number }
+
+  /api/v1/metrics/slo:
+    get:
+      summary: SLO error budget per service
+      parameters:
+        - { name: target, in: query, schema: { type: number, default: 0.01 }, description: "target error rate" }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slos:            { type: array, items: { $ref: '#/components/schemas/SLOResult' } }
+                  targetErrorRate: { type: number }
+
+  /api/v1/sampler:
+    get:
+      summary: Get current sampler config
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SamplerConfig' }
+    put:
+      summary: Update sampler config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SamplerConfig' }
+      responses:
+        "200": { description: Updated }
+
+  /sse/spans:
+    get:
+      summary: Live span events (Server-Sent Events)
+      security: []
+      responses:
+        "200":
+          description: SSE stream; each event has type "span"
+          content:
+            text/event-stream: {}
+
+  /sse/traces:
+    get:
+      summary: Live trace-complete events (Server-Sent Events)
+      security: []
+      responses:
+        "200":
+          description: SSE stream; each event has type "trace"
+          content:
+            text/event-stream: {}
+
+  /sse/metrics:
+    get:
+      summary: Metrics refresh tick (Server-Sent Events)
+      security: []
+      responses:
+        "200":
+          description: SSE stream; each event has type "metrics"
+          content:
+            text/event-stream: {}
+
+  /sse/sampler:
+    get:
+      summary: Sampler stats tick (Server-Sent Events)
+      security: []
+      responses:
+        "200":
+          description: SSE stream; each event has type "sampler"
+          content:
+            text/event-stream: {}
+
+  /openapi.yaml:
+    get:
+      summary: This OpenAPI specification
+      security: []
+      responses:
+        "200":
+          content:
+            application/yaml: {}
