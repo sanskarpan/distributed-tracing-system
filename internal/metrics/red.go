@@ -42,8 +42,9 @@ type HeatmapBucket struct {
 
 // MetricsStore stores RED metrics (Rate, Errors, Duration) per service/operation.
 type MetricsStore struct {
-	mu   sync.RWMutex
-	data map[MetricKey]*ServiceMetrics
+	mu          sync.RWMutex
+	data        map[MetricKey]*ServiceMetrics
+	latencyHeat sync.Map // service string → *serviceLatencyHeatmap
 }
 
 // NewMetricsStore creates a new MetricsStore.
@@ -84,6 +85,10 @@ func (m *MetricsStore) Record(span *model.Span) {
 		durMs = 0
 	}
 	sm.Durations.Record(durMs)
+
+	// Record into per-service latency heatmap
+	heat, _ := m.latencyHeat.LoadOrStore(span.ServiceName, &serviceLatencyHeatmap{})
+	heat.(*serviceLatencyHeatmap).record(durMs)
 }
 
 // HeatmapData returns 10-second aggregated span and error counts for a service over the last 60s.
@@ -136,6 +141,49 @@ func (m *MetricsStore) HeatmapData(service string) []HeatmapBucket {
 		buckets[i] = HeatmapBucket{Ts: ts, Spans: spanTotals[i], Errors: errTotals[i]}
 	}
 	return buckets
+}
+
+// LatencyHeatmap2D returns 2D time × latency bucket data for a service (or all services if "").
+func (m *MetricsStore) LatencyHeatmap2D(service string) LatencyHeatmapData {
+	// Collect matching heatmaps
+	var heats []*serviceLatencyHeatmap
+	m.latencyHeat.Range(func(k, v any) bool {
+		if service == "" || k.(string) == service {
+			heats = append(heats, v.(*serviceLatencyHeatmap))
+		}
+		return true
+	})
+
+	if len(heats) == 0 {
+		return LatencyHeatmapData{Bounds: latencyBounds, Buckets: []LatencyHeatmapBucket{}}
+	}
+
+	// Merge all matching heatmaps by timestamp
+	merged := make(map[int64][]int64) // ts → counts
+	for _, h := range heats {
+		for _, b := range h.data() {
+			if _, ok := merged[b.Ts]; !ok {
+				merged[b.Ts] = make([]int64, heatmapNumBands)
+			}
+			for i, c := range b.Counts {
+				merged[b.Ts][i] += c
+			}
+		}
+	}
+
+	// Sort by timestamp
+	tss := make([]int64, 0, len(merged))
+	for ts := range merged {
+		tss = append(tss, ts)
+	}
+	sort.Slice(tss, func(i, j int) bool { return tss[i] < tss[j] })
+
+	buckets := make([]LatencyHeatmapBucket, len(tss))
+	for i, ts := range tss {
+		buckets[i] = LatencyHeatmapBucket{Ts: ts, Counts: merged[ts]}
+	}
+
+	return LatencyHeatmapData{Bounds: latencyBounds, Buckets: buckets}
 }
 
 // Snapshot returns current metrics for all (service, operation) keys.
