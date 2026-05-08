@@ -1,7 +1,9 @@
 import { Link, useLocation } from 'react-router-dom'
+import { useDarkMode } from '@/hooks/useDarkMode'
 
 const navItems = [
   { path: '/', label: 'Search' },
+  { path: '/timeline', label: 'Timeline' },
   { path: '/map', label: 'Service Map' },
   { path: '/metrics', label: 'Metrics' },
   { path: '/sampler', label: 'Sampler' },
@@ -9,6 +11,7 @@ const navItems = [
 
 export function Nav() {
   const location = useLocation()
+  const { dark, toggle } = useDarkMode()
 
   return (
     <nav className="border-b bg-background px-4 py-2 flex items-center gap-1">
@@ -26,6 +29,14 @@ export function Nav() {
           {item.label}
         </Link>
       ))}
+      <button
+        onClick={toggle}
+        className="ml-auto p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors text-base"
+        title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+        aria-label="Toggle dark mode"
+      >
+        {dark ? '☀' : '☾'}
+      </button>
     </nav>
   )
 }
