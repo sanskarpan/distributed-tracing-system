@@ -5,6 +5,9 @@ import type {
   MetricSnapshotDTO,
   SamplerConfig,
   TraceComparisonDTO,
+  AnomalyResult,
+  SLOResult,
+  HeatmapResponse,
 } from '@/types'
 
 const BASE = ''  // proxied by Vite
@@ -65,5 +68,24 @@ export const api = {
 
   async compareTraces(baseId: string, compareId: string): Promise<TraceComparisonDTO> {
     return fetchJSON<TraceComparisonDTO>(`/api/v1/traces/compare?base=${baseId}&compare=${compareId}`)
+  },
+
+  async getConfig(): Promise<{ logLinkTemplate?: string }> {
+    return fetchJSON<{ logLinkTemplate?: string }>('/api/v1/config')
+  },
+
+  async getHeatmap(service?: string): Promise<HeatmapResponse> {
+    const qs = service ? `?service=${encodeURIComponent(service)}` : ''
+    return fetchJSON<HeatmapResponse>(`/api/v1/metrics/heatmap${qs}`)
+  },
+
+  async getAnomalies(zThreshold?: number): Promise<{ anomalies: AnomalyResult[] }> {
+    const qs = zThreshold !== undefined ? `?z=${zThreshold}` : ''
+    return fetchJSON<{ anomalies: AnomalyResult[] }>(`/api/v1/metrics/anomalies${qs}`)
+  },
+
+  async getSLOs(target?: number): Promise<{ slos: SLOResult[] }> {
+    const qs = target !== undefined ? `?target=${target}` : ''
+    return fetchJSON<{ slos: SLOResult[] }>(`/api/v1/metrics/slo${qs}`)
   },
 }
