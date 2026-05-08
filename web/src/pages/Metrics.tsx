@@ -15,7 +15,8 @@ import {
 } from 'recharts'
 import { api } from '@/api/client'
 import { useSSE } from '@/hooks/useSSE'
-import type { MetricSnapshotDTO } from '@/types'
+import { LatencyHeatmapChart } from '@/components/metrics/LatencyHeatmapChart'
+import type { MetricSnapshotDTO, AnomalyResult, SLOResult, LatencyHeatmapData } from '@/types'
 import {
   Select,
   SelectContent,
@@ -31,12 +32,25 @@ export function MetricsPage() {
   const [selectedService, setSelectedService] = useState<string>('')
   const [sortKey, setSortKey] = useState<SortKey>('rate')
   const [sortAsc, setSortAsc] = useState(false)
+  const [anomalies, setAnomalies] = useState<AnomalyResult[]>([])
+  const [slos, setSlos] = useState<SLOResult[]>([])
+  const [heatmapData, setHeatmapData] = useState<LatencyHeatmapData>({ bounds: [], buckets: [] })
 
   const services = [...new Set(metrics.map(m => m.service))]
 
   const fetchMetrics = useCallback(() => {
-    api.getMetrics().then(r => setMetrics(r.metrics)).catch(console.error)
-  }, [])
+    Promise.all([
+      api.getMetrics(),
+      api.getAnomalies(),
+      api.getSLOs(),
+      api.getHeatmap(selectedService || undefined),
+    ]).then(([metricsRes, anomaliesRes, slosRes, heatmapRes]) => {
+      setMetrics(metricsRes.metrics)
+      setAnomalies(anomaliesRes.anomalies?.filter(a => a.isOutlier) ?? [])
+      setSlos(slosRes.slos ?? [])
+      setHeatmapData(heatmapRes.latency)
+    }).catch(console.error)
+  }, [selectedService])
 
   useEffect(() => {
     fetchMetrics()
@@ -99,6 +113,48 @@ export function MetricsPage() {
           </SelectContent>
         </Select>
       </div>
+
+      {slos.length > 0 && (
+        <div className="border rounded-lg p-4">
+          <h3 className="text-sm font-semibold mb-3">Error Budget (SLO: &lt;1% errors)</h3>
+          <div className="space-y-2">
+            {slos.map((s, i) => (
+              <div key={i} className="flex items-center gap-3">
+                <span className="text-xs font-mono w-32 shrink-0">{s.service}</span>
+                <div className="flex-1 bg-muted rounded-full h-3 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${s.breached ? 'bg-red-500' : 'bg-green-500'}`}
+                    style={{ width: `${Math.max(0, s.budgetRemaining * 100).toFixed(1)}%` }}
+                  />
+                </div>
+                <span className={`text-xs w-20 text-right ${s.breached ? 'text-red-600 font-semibold' : 'text-muted-foreground'}`}>
+                  {s.breached ? 'BREACHED' : `${(s.budgetRemaining * 100).toFixed(1)}% left`}
+                </span>
+                <span className="text-xs text-muted-foreground w-20 text-right">
+                  {(s.currentErrorRate * 100).toFixed(2)}% err
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {anomalies.length > 0 && (
+        <div className="border border-amber-400 bg-amber-50 dark:bg-amber-950/30 rounded-lg p-3">
+          <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-2">
+            Latency Anomalies ({anomalies.length})
+          </h3>
+          <div className="space-y-1">
+            {anomalies.map((a, i) => (
+              <div key={i} className="text-xs text-amber-700 dark:text-amber-400 flex gap-3">
+                <span className="font-mono font-semibold">{a.service}/{a.operation}</span>
+                <span>P99: {a.p99Ms.toFixed(1)}ms</span>
+                <span>z-score: {a.zScore.toFixed(1)}σ</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {chartData.length === 0 ? (
         <p className="text-muted-foreground text-center py-8">
@@ -178,6 +234,12 @@ export function MetricsPage() {
               </ResponsiveContainer>
             </div>
           )}
+
+          {/* 2D Latency Heatmap (time × latency bucket) */}
+          <div className="border rounded-lg p-4">
+            <h3 className="text-sm font-semibold mb-2">Real-time Latency Heatmap (time × latency band)</h3>
+            <LatencyHeatmapChart data={heatmapData} />
+          </div>
 
           {/* Sortable operations table */}
           <div className="border rounded-lg overflow-hidden">
