@@ -11,6 +11,7 @@ type TraceQuery struct {
 	ServiceName   string
 	OperationName string
 	Tags          map[string]string
+	AttributeKV   string // "key=value" attribute filter applied across all spans
 	MinDuration   *time.Duration
 	MaxDuration   *time.Duration
 	HasError      *bool
