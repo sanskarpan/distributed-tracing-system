@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -13,10 +14,39 @@ import (
 )
 
 func SetupRoutes(ctx context.Context, r *chi.Mux, pipeline *Pipeline, store storage.TraceStore,
-	metricsStore *metrics.MetricsStore, sseBus *SSEBus) {
+	metricsStore *metrics.MetricsStore, sseBus *SSEBus, apiKey string) {
+
+	// Wire pipeline worker pool shutdown to context
+	pipeline.StartWithContext(ctx)
 
 	r.Use(middleware.Recoverer)
+	r.Use(middleware.Compress(5, "application/json", "text/plain", "text/html"))
 	r.Use(CORS)
+	r.Use(APIKeyAuth(apiKey))
+
+	// Health probes and API spec (unauthenticated)
+	r.Get("/healthz", HandleHealthz)
+	r.Get("/readyz", HandleReadyz)
+	r.Get("/openapi.yaml", HandleOpenAPI)
+
+	// Prometheus self-observability metrics
+	r.Get("/metrics", NewPrometheusHandler(metricsStore, pipeline).ServeHTTP)
+
+	// Frontend configuration
+	r.Get("/api/v1/config", HandleConfig)
+
+	// Collector stats
+	r.Get("/api/v1/stats", func(w http.ResponseWriter, r *http.Request) {
+		sampled, dropped := pipeline.Stats()
+		storeStats := store.Stats()
+		writeJSON(w, map[string]any{
+			"sampledTotal":    sampled,
+			"droppedTotal":    dropped,
+			"workerQueueDepth": pipeline.QueueDepth(),
+			"traceCount":      storeStats.TraceCount,
+			"maxTraces":       storeStats.MaxSize,
+		})
+	})
 
 	ingest := NewIngestHandler(pipeline)
 	query := NewQueryHandler(store, pipeline)
@@ -26,11 +56,13 @@ func SetupRoutes(ctx context.Context, r *chi.Mux, pipeline *Pipeline, store stor
 	// Ingest
 	r.Post("/api/v1/spans", ingest.HandleNativeSpans)
 	r.Post("/v1/traces", ingest.HandleOTLPTraces)
+	r.Post("/api/v2/spans", ingest.HandleZipkinSpans) // Zipkin v2 JSON
 
 	// Query
 	r.Get("/api/v1/traces", query.HandleListTraces)
 	r.Get("/api/v1/traces/compare", query.HandleCompareTraces)
 	r.Get("/api/v1/traces/{traceId}", query.HandleGetTrace)
+	r.Get("/api/v1/traces/{traceId}/export", query.HandleExportTrace)
 	r.Get("/api/v1/services", query.HandleGetServices)
 	r.Get("/api/v1/operations", query.HandleGetOperations)
 	r.Get("/api/v1/dependencies", query.HandleGetDependencies)
@@ -38,6 +70,8 @@ func SetupRoutes(ctx context.Context, r *chi.Mux, pipeline *Pipeline, store stor
 	// Metrics
 	r.Get("/api/v1/metrics/red", metricsH.HandleREDMetrics)
 	r.Get("/api/v1/metrics/heatmap", metricsH.HandleHeatmap)
+	r.Get("/api/v1/metrics/anomalies", metricsH.HandleAnomalies)
+	r.Get("/api/v1/metrics/slo", metricsH.HandleSLOs)
 
 	// Sampler
 	r.Get("/api/v1/sampler", samplerH.HandleGetSampler)
