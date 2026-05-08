@@ -35,7 +35,7 @@ func testServer(t *testing.T) *httptest.Server {
 	t.Cleanup(cancel)
 
 	r := chi.NewRouter()
-	api.SetupRoutes(ctx, r, pipeline, store, metricsStore, sseBus)
+	api.SetupRoutes(ctx, r, pipeline, store, metricsStore, sseBus, "" /* no auth */)
 	return httptest.NewServer(r)
 }
 

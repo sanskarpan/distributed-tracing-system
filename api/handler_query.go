@@ -104,6 +104,27 @@ func (h *QueryHandler) HandleGetDependencies(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// HandleExportTrace handles GET /api/v1/traces/{traceId}/export
+// It returns the full trace as a downloadable JSON file.
+func (h *QueryHandler) HandleExportTrace(w http.ResponseWriter, r *http.Request) {
+	traceIDStr := chi.URLParam(r, "traceId")
+	traceID, err := model.ParseTraceID(traceIDStr)
+	if err != nil {
+		http.Error(w, `{"error":"invalid trace ID"}`, 400)
+		return
+	}
+
+	trace, ok := h.store.Get(traceID)
+	if !ok {
+		http.Error(w, `{"error":"trace not found"}`, 404)
+		return
+	}
+
+	filename := "trace-" + traceIDStr + ".json"
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	writeJSON(w, traceToDetailDTO(trace))
+}
+
 // HandleCompareTraces handles GET /api/v1/traces/compare?base=X&compare=Y
 func (h *QueryHandler) HandleCompareTraces(w http.ResponseWriter, r *http.Request) {
 	baseIDStr := r.URL.Query().Get("base")
@@ -158,6 +179,7 @@ func buildTraceQuery(r *http.Request) *storage.TraceQuery {
 	q := &storage.TraceQuery{
 		ServiceName:   r.URL.Query().Get("service"),
 		OperationName: r.URL.Query().Get("operation"),
+		AttributeKV:   r.URL.Query().Get("attr"),
 		SortBy:        r.URL.Query().Get("sortBy"),
 		SortDesc:      r.URL.Query().Get("sortDesc") == "true",
 		Limit:         20,
