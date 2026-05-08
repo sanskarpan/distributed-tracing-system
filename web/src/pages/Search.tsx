@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useSearch } from '@/hooks/useSearch'
@@ -9,6 +9,7 @@ import { FilterBar } from '@/components/search/FilterBar'
 import { Button } from '@/components/ui/button'
 import { api } from '@/api/client'
 import type { TraceSummaryDTO } from '@/types'
+import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 
 const PAGE_SIZE = 20
 
@@ -17,6 +18,23 @@ export function SearchPage() {
   const { results, loading, filters, setFilters } = useSearch({ limit: PAGE_SIZE })
   const { services, setServices, liveTraces, addLiveTrace } = useTracingStore()
   const [operations, setOperations] = useState<string[]>([])
+  const serviceSelectRef = useRef<HTMLDivElement>(null)
+
+  useKeyboardShortcuts([
+    {
+      key: '/',
+      description: 'Focus service filter',
+      handler: () => {
+        const input = serviceSelectRef.current?.querySelector('button')
+        input?.click()
+      },
+    },
+    {
+      key: 'r',
+      description: 'Reset filters',
+      handler: () => setFilters({ limit: PAGE_SIZE }),
+    },
+  ])
 
   useEffect(() => {
     api.getServices().then(r => setServices(r.services)).catch(console.error)
@@ -58,12 +76,18 @@ export function SearchPage() {
         {loading && <span className="text-sm text-muted-foreground">Loading&hellip;</span>}
       </div>
 
-      <FilterBar
-        services={services}
-        operations={operations}
-        filters={filters}
-        onChange={(f) => setFilters({ ...f, offset: 0 })}
-      />
+      <div ref={serviceSelectRef}>
+        <FilterBar
+          services={services}
+          operations={operations}
+          filters={filters}
+          onChange={(f) => setFilters({ ...f, offset: 0 })}
+        />
+      </div>
+      <div className="mt-1 text-xs text-muted-foreground flex gap-4">
+        <span><kbd className="font-mono bg-muted px-1 rounded">/</kbd> filter by service</span>
+        <span><kbd className="font-mono bg-muted px-1 rounded">r</kbd> reset filters</span>
+      </div>
 
       <div className="mt-4 space-y-2">
         <AnimatePresence mode="popLayout">
