@@ -12,7 +12,11 @@ import (
 func main() {
 	fmt.Println("traffic generator starting")
 
-	runner := demo.NewRunner("http://localhost:4318")
+	collectorURL := os.Getenv("COLLECTOR_URL")
+	if collectorURL == "" {
+		collectorURL = "http://localhost:4318"
+	}
+	runner := demo.NewRunner(collectorURL)
 	runner.Start()
 
 	quit := make(chan os.Signal, 1)
