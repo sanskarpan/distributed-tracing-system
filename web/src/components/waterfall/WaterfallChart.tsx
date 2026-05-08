@@ -277,7 +277,7 @@ export function WaterfallChart({ trace, onSpanSelect, criticalPathIds, grayedSpa
 
   return (
     <div className="relative w-full overflow-hidden border rounded-lg bg-white">
-      <svg ref={svgRef} className="w-full" style={{ minHeight: 200 }} />
+      <svg ref={svgRef} className="w-full waterfall-svg" style={{ minHeight: 200 }} />
     </div>
   )
 }

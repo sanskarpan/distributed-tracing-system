@@ -2,6 +2,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Badge } from '@/components/ui/badge'
 import type { SpanDetailDTO } from '@/types'
 import { getKindLabel, getStatusLabel, getServiceColor } from '@/lib/colors'
+import { useConfig } from '@/hooks/useConfig'
 
 interface Props {
   span: SpanDetailDTO | null
@@ -12,12 +13,19 @@ interface Props {
 }
 
 export function SpanDrawer({ span, open, onClose, onParentClick, allSpans }: Props) {
+  const config = useConfig()
   if (!span) return null
   const durationMs = span.durationMs
   const isError = span.status.code === 2
   const parentSpan = span.parentSpanId
     ? allSpans?.find(s => s.spanId === span.parentSpanId)
     : undefined
+
+  const logLink = config.logLinkTemplate
+    ? config.logLinkTemplate
+        .replace('{traceId}', span.traceId)
+        .replace('{spanId}', span.spanId)
+    : null
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
@@ -36,6 +44,18 @@ export function SpanDrawer({ span, open, onClose, onParentClick, allSpans }: Pro
         </SheetHeader>
 
         <div className="mt-4 space-y-4">
+          {/* Log correlation link */}
+          {logLink && (
+            <a
+              href={logLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+            >
+              View Logs ↗
+            </a>
+          )}
+
           {/* Parent link */}
           {parentSpan && onParentClick && (
             <button
