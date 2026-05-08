@@ -186,7 +186,7 @@ export function SamplerPage() {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="t" tick={{ fontSize: 9 }} />
                 <YAxis domain={[0, 100]} />
-                <Tooltip formatter={(v: number) => `${v.toFixed(1)}%`} />
+                <Tooltip formatter={(v) => typeof v === 'number' ? `${v.toFixed(1)}%` : ''} />
                 <Line type="monotone" dataKey="rate" stroke="#2563eb" dot={false} name="Rate %" />
               </LineChart>
             </ResponsiveContainer>

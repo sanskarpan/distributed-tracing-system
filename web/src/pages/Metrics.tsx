@@ -129,7 +129,7 @@ export function MetricsPage() {
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="name" tick={{ fontSize: 10 }} />
                   <YAxis />
-                  <Tooltip formatter={(v: number) => `${v.toFixed(1)}%`} />
+                  <Tooltip formatter={(v) => typeof v === 'number' ? `${v.toFixed(1)}%` : ''} />
                   <Area
                     type="monotone"
                     dataKey="errorRate"
