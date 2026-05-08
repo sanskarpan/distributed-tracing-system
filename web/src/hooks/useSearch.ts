@@ -5,6 +5,7 @@ import type { TraceListResponse } from '@/types'
 export interface SearchFilters {
   service?: string
   operation?: string
+  attr?: string
   status?: 'all' | 'error'
   minDuration?: number
   maxDuration?: number
@@ -30,6 +31,7 @@ export function useSearch(initialFilters: SearchFilters) {
       const params: Record<string, string | number | boolean | undefined> = {}
       if (filters.service) params.service = filters.service
       if (filters.operation) params.operation = filters.operation
+      if (filters.attr) params.attr = filters.attr
       if (filters.status && filters.status !== 'all') params.status = filters.status
       if (filters.minDuration !== undefined) params.minDuration = filters.minDuration
       if (filters.maxDuration !== undefined) params.maxDuration = filters.maxDuration
