@@ -1,0 +1,40 @@
+services:
+  collector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "4318:4318"
+    environment:
+      - TZ=UTC
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4318/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      collector:
+        condition: service_healthy
+    restart: unless-stopped
+
+  demo:
+    build:
+      context: .
+      dockerfile: Dockerfile.demo
+    environment:
+      - COLLECTOR_URL=http://collector:4318
+    depends_on:
+      collector:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - demo
