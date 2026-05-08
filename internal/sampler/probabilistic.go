@@ -20,8 +20,17 @@ func NewProbabilistic(rate float64) *ProbabilisticSampler {
 	rate = math.Max(0, math.Min(1, rate))
 	return &ProbabilisticSampler{
 		rate:      rate,
-		threshold: uint64(rate * float64(math.MaxUint64)),
+		threshold: rateToThreshold(rate),
 	}
+}
+
+// rateToThreshold converts a [0,1] rate to a uint64 threshold.
+// rate=1.0 uses MaxUint64 to avoid overflow when casting float64(math.MaxUint64).
+func rateToThreshold(rate float64) uint64 {
+	if rate >= 1.0 {
+		return math.MaxUint64
+	}
+	return uint64(rate * float64(math.MaxUint64))
 }
 
 func (s *ProbabilisticSampler) ShouldSample(p SamplingParameters) SamplingResult {
@@ -40,7 +49,7 @@ func (s *ProbabilisticSampler) ShouldSample(p SamplingParameters) SamplingResult
 func (s *ProbabilisticSampler) SetRate(rate float64) {
 	s.mu.Lock()
 	s.rate = math.Max(0, math.Min(1, rate))
-	s.threshold = uint64(s.rate * float64(math.MaxUint64))
+	s.threshold = rateToThreshold(s.rate)
 	s.mu.Unlock()
 }
 
