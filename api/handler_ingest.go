@@ -83,6 +83,25 @@ func dtoToSpan(dto SpanDTO) (*model.Span, error) {
 		return nil, fmt.Errorf("endTimeUnixNano must be >= startTimeUnixNano")
 	}
 
+	// Enforce field length limits
+	if len(dto.ServiceName) > 256 {
+		return nil, fmt.Errorf("serviceName exceeds 256 characters")
+	}
+	if len(dto.Name) > 256 {
+		return nil, fmt.Errorf("span name exceeds 256 characters")
+	}
+	if len(dto.Attributes) > 64 {
+		return nil, fmt.Errorf("too many span attributes (max 64)")
+	}
+	for _, kv := range dto.Attributes {
+		if len(kv.Key) > 128 {
+			return nil, fmt.Errorf("attribute key %q exceeds 128 characters", kv.Key)
+		}
+		if kv.StringValue != nil && len(*kv.StringValue) > 1024 {
+			return nil, fmt.Errorf("attribute %q value exceeds 1024 characters", kv.Key)
+		}
+	}
+
 	sp := &model.Span{
 		TraceID:      traceID,
 		SpanID:       spanID,
