@@ -6,6 +6,7 @@ import { ServiceMapPage } from '@/pages/ServiceMap'
 import { MetricsPage } from '@/pages/Metrics'
 import { SamplerPage } from '@/pages/Sampler'
 import { ComparePage } from '@/pages/Compare'
+import { TimelinePage } from '@/pages/Timeline'
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
             <Route path="/metrics" element={<MetricsPage />} />
             <Route path="/sampler" element={<SamplerPage />} />
             <Route path="/compare" element={<ComparePage />} />
+            <Route path="/timeline" element={<TimelinePage />} />
           </Routes>
         </main>
       </div>
