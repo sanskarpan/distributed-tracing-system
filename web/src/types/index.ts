@@ -128,6 +128,40 @@ export interface SamplerConfig {
   stats: SamplerStats
 }
 
+export interface LatencyHeatmapBucket {
+  ts: number       // unix seconds
+  counts: number[] // count per latency band
+}
+
+export interface LatencyHeatmapData {
+  bounds: number[]               // upper bound of each band in ms
+  buckets: LatencyHeatmapBucket[]
+}
+
+export interface HeatmapResponse {
+  resolution: string
+  buckets: { ts: number; spans: number; errors: number }[]
+  latency: LatencyHeatmapData
+}
+
+export interface AnomalyResult {
+  service: string
+  operation: string
+  p99Ms: number
+  meanMs: number
+  stddevMs: number
+  zScore: number
+  isOutlier: boolean
+}
+
+export interface SLOResult {
+  service: string
+  targetErrorRate: number
+  currentErrorRate: number
+  budgetRemaining: number
+  breached: boolean
+}
+
 export interface TraceComparisonDTO {
   durationDeltaMs: number
   spanCountDelta: number
