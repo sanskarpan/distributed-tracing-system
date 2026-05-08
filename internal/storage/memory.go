@@ -1,8 +1,10 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -73,30 +75,13 @@ func (s *MemoryStore) Upsert(trace *model.Trace) error {
 		s.byService[svc][id] = struct{}{}
 	}
 
-	// Index by operation: "service:operation" for root span
-	if trace.RootSpan != nil {
-		key := fmt.Sprintf("%s:%s", trace.RootSpan.ServiceName, trace.RootSpan.Name)
-		if s.byOperation[key] == nil {
-			s.byOperation[key] = make(map[model.TraceID]struct{})
+	// Index by operation: "service:operation" for all spans (root span is included in trace.Spans)
+	for _, span := range trace.Spans {
+		opKey := fmt.Sprintf("%s:%s", span.ServiceName, span.Name)
+		if s.byOperation[opKey] == nil {
+			s.byOperation[opKey] = make(map[model.TraceID]struct{})
 		}
-		s.byOperation[key][id] = struct{}{}
-
-		// Also index all spans' operations
-		for _, span := range trace.Spans {
-			opKey := fmt.Sprintf("%s:%s", span.ServiceName, span.Name)
-			if s.byOperation[opKey] == nil {
-				s.byOperation[opKey] = make(map[model.TraceID]struct{})
-			}
-			s.byOperation[opKey][id] = struct{}{}
-		}
-	} else {
-		for _, span := range trace.Spans {
-			opKey := fmt.Sprintf("%s:%s", span.ServiceName, span.Name)
-			if s.byOperation[opKey] == nil {
-				s.byOperation[opKey] = make(map[model.TraceID]struct{})
-			}
-			s.byOperation[opKey][id] = struct{}{}
-		}
+		s.byOperation[opKey][id] = struct{}{}
 	}
 
 	// Index by error
@@ -258,6 +243,9 @@ func (s *MemoryStore) Query(q *TraceQuery) (*TraceQueryResult, error) {
 		if q.EndTime != nil && tr.ReceivedAt.After(*q.EndTime) {
 			continue
 		}
+		if q.AttributeKV != "" && !traceMatchesAttributeKV(tr, q.AttributeKV) {
+			continue
+		}
 
 		filtered = append(filtered, tr)
 	}
@@ -359,6 +347,37 @@ func (s *MemoryStore) Operations(service string) []string {
 	return ops
 }
 
+// EvictOlderThan removes all traces received before the given cutoff time.
+// Returns the number of traces evicted.
+func (s *MemoryStore) EvictOlderThan(cutoff time.Time) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	evicted := 0
+	for len(s.timeline) > 0 && s.timeline[0].receivedAt.Before(cutoff) {
+		s.evict()
+		evicted++
+	}
+	return evicted
+}
+
+// StartRetention launches a background goroutine that evicts traces older than ttl
+// at the given check interval. It stops when ctx is cancelled.
+func (s *MemoryStore) StartRetention(ctx context.Context, ttl, interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.EvictOlderThan(time.Now().Add(-ttl))
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+}
+
 // Stats returns operational statistics for the store.
 func (s *MemoryStore) Stats() StoreStats {
 	s.mu.RLock()
@@ -404,6 +423,39 @@ func intersectSets(a, b map[model.TraceID]struct{}) map[model.TraceID]struct{} {
 		}
 	}
 	return out
+}
+
+// traceMatchesAttributeKV returns true if any span in the trace has an attribute
+// matching the "key=value" filter. The comparison is case-insensitive substring match
+// on the value when the filter is "key=value", or substring match on the key when
+// the filter has no "=".
+func traceMatchesAttributeKV(tr *model.Trace, filter string) bool {
+	filterKey, filterVal, hasEq := strings.Cut(filter, "=")
+	filterKey = strings.ToLower(strings.TrimSpace(filterKey))
+	filterVal = strings.ToLower(strings.TrimSpace(filterVal))
+
+	for _, sp := range tr.Spans {
+		for _, kv := range sp.Attributes {
+			k := strings.ToLower(kv.Key)
+			if !strings.Contains(k, filterKey) {
+				continue
+			}
+			if !hasEq {
+				return true
+			}
+			var valStr string
+			switch kv.Type {
+			case model.ValueString:
+				valStr = strings.ToLower(kv.SVal)
+			default:
+				valStr = fmt.Sprintf("%v", kv.IVal)
+			}
+			if strings.Contains(valStr, filterVal) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // operationFromKey extracts the operation name from a "service:operation" index key.
