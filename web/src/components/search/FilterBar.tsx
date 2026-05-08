@@ -82,6 +82,15 @@ export function FilterBar({ services, operations, filters, onChange }: Props) {
         </SelectContent>
       </Select>
 
+      {/* Attribute search */}
+      <input
+        type="text"
+        placeholder="attr: key=value"
+        value={filters.attr ?? ''}
+        onChange={(e) => onChange({ ...filters, attr: e.target.value || undefined })}
+        className="h-9 rounded-md border border-input bg-background px-3 text-sm w-44 placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+      />
+
       {/* Errors only toggle */}
       <div className="flex items-center gap-2">
         <Switch
