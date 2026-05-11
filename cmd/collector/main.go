@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -78,10 +79,6 @@ func main() {
 			log.Printf("gRPC serve: %v", err)
 		}
 	}()
-	go func() {
-		<-ctx.Done()
-		grpcSrv.GracefulStop()
-	}()
 
 	r := chi.NewRouter()
 	api.SetupRoutes(ctx, r, pipeline, store, metricsStore, sseBus, apiKey)
@@ -111,4 +108,15 @@ func main() {
 
 	<-ctx.Done()
 	fmt.Println("shutting down collector")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Printf("http shutdown: %v", err)
+	}
+	grpcSrv.GracefulStop()
+	if err := pipeline.Shutdown(shutdownCtx); err != nil {
+		log.Printf("pipeline shutdown: %v", err)
+	}
 }

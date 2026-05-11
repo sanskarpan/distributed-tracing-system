@@ -26,8 +26,9 @@ type Pipeline struct {
 
 	// Worker pool
 	workCh chan *model.Span
-	quit   chan struct{} // closed on shutdown; never closed workCh to avoid send-to-closed-channel panics
 	wg     sync.WaitGroup
+
+	shutdownOnce sync.Once
 
 	// Stats
 	sampledTotal int64
@@ -56,7 +57,6 @@ func NewPipeline(store storage.TraceStore, metricsStore *metrics.MetricsStore,
 		sseBus:   sseBus,
 		analyzer: analyzer,
 		workCh:   make(chan *model.Span, workerQueueDepth),
-		quit:     make(chan struct{}),
 	}
 
 	p.assembler = processor.NewAssembler(timeout, func(trace *model.Trace) {
@@ -80,13 +80,8 @@ func NewPipeline(store storage.TraceStore, metricsStore *metrics.MetricsStore,
 		p.wg.Add(1)
 		go func() {
 			defer p.wg.Done()
-			for {
-				select {
-				case span := <-p.workCh:
-					p.processSpan(span)
-				case <-p.quit:
-					return
-				}
+			for span := range p.workCh {
+				p.processSpan(span)
 			}
 		}()
 	}
@@ -94,14 +89,11 @@ func NewPipeline(store storage.TraceStore, metricsStore *metrics.MetricsStore,
 	return p
 }
 
-// StartWithContext wires the worker pool shutdown to context cancellation.
-// It closes p.quit (not p.workCh) so in-flight sends in IngestSpans never
-// hit a "send on closed channel" panic.
+// StartWithContext wires pipeline shutdown to context cancellation.
 func (p *Pipeline) StartWithContext(ctx context.Context) {
 	go func() {
 		<-ctx.Done()
-		close(p.quit)
-		p.wg.Wait()
+		_ = p.Shutdown(context.Background())
 	}()
 }
 
@@ -146,12 +138,9 @@ func (p *Pipeline) IngestSpans(spans []*model.Span) (accepted, dropped int, err 
 			continue
 		}
 
-		// Submit to worker pool; fall back to inline if queue full or shutting down.
-		// workCh is never closed so sends cannot panic.
+		// Submit to worker pool; fall back to inline if queue full.
 		select {
 		case p.workCh <- span:
-		case <-p.quit:
-			p.processSpan(span)
 		default:
 			p.processSpan(span)
 		}
@@ -196,6 +185,35 @@ func (p *Pipeline) Stats() (sampled, dropped int64) {
 // QueueDepth returns the number of spans currently waiting in the worker pool queue.
 func (p *Pipeline) QueueDepth() int {
 	return len(p.workCh)
+}
+
+// Shutdown drains worker processing, flushes deferred sampler state,
+// and finalizes traces still pending assembly.
+func (p *Pipeline) Shutdown(ctx context.Context) error {
+	var shutdownErr error
+
+	p.shutdownOnce.Do(func() {
+		if stopper, ok := p.GetSampler().(interface{ Stop() }); ok {
+			stopper.Stop()
+		}
+
+		close(p.workCh)
+
+		done := make(chan struct{})
+		go func() {
+			p.wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			p.assembler.Stop()
+		case <-ctx.Done():
+			shutdownErr = ctx.Err()
+		}
+	})
+
+	return shutdownErr
 }
 
 type spanSSE struct {
@@ -260,4 +278,3 @@ func traceToSummarySSE(t *model.Trace) traceSSE {
 		ReceivedAt:  t.ReceivedAt,
 	}
 }
-
