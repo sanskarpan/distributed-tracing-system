@@ -22,7 +22,8 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   async getTraces(
-    params: Record<string, string | number | boolean | undefined>
+    params: Record<string, string | number | boolean | undefined>,
+    options?: RequestInit
   ): Promise<TraceListResponse> {
     const qs = new URLSearchParams()
     for (const [k, v] of Object.entries(params)) {
@@ -31,7 +32,7 @@ export const api = {
       }
     }
     const query = qs.toString() ? `?${qs.toString()}` : ''
-    return fetchJSON<TraceListResponse>(`/api/v1/traces${query}`)
+    return fetchJSON<TraceListResponse>(`/api/v1/traces${query}`, options)
   },
 
   async getTrace(traceId: string): Promise<TraceDetailDTO> {
