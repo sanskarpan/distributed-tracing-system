@@ -18,6 +18,7 @@ func BenchmarkTailSampler_AddSpan(b *testing.B) {
 		func(model.TraceID) {},
 	)
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		traceID, _ := model.NewTraceID()
@@ -37,8 +38,22 @@ func BenchmarkProbabilisticSampler_ShouldSample(b *testing.B) {
 	id, _ := model.NewTraceID()
 	p := sampler.SamplingParameters{TraceID: id}
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		s.ShouldSample(p)
 	}
+}
+
+func BenchmarkProbabilisticSampler_ShouldSample_Parallel(b *testing.B) {
+	s := sampler.NewProbabilistic(0.5)
+	id, _ := model.NewTraceID()
+	p := sampler.SamplingParameters{TraceID: id}
+
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			s.ShouldSample(p)
+		}
+	})
 }
