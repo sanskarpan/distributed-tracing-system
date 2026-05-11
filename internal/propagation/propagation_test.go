@@ -71,6 +71,7 @@ func TestW3C_InvalidTraceparent(t *testing.T) {
 		"01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", // version != 00
 		"00-tooshort-00f067aa0ba902b7-01",
 		"00-4bf92f3577b34da6a3ce929d0e0e4736-tooshort-01",
+		"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-0g",
 	}
 	for _, val := range cases {
 		headers := make(http.Header)
@@ -84,6 +85,21 @@ func TestW3C_MissingHeaders(t *testing.T) {
 	p := propagation.W3CPropagator{}
 	_, ok := p.Extract(make(http.Header))
 	assert.False(t, ok)
+}
+
+func TestW3C_ExtractDecodesFlagByte(t *testing.T) {
+	p := propagation.W3CPropagator{}
+
+	headers := make(http.Header)
+	headers.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-0a")
+	extracted, ok := p.Extract(headers)
+	require.True(t, ok)
+	assert.False(t, extracted.IsSampled)
+
+	headers.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-09")
+	extracted, ok = p.Extract(headers)
+	require.True(t, ok)
+	assert.True(t, extracted.IsSampled)
 }
 
 func TestB3_InjectExtractRoundtrip(t *testing.T) {
@@ -111,6 +127,33 @@ func TestB3Single_InjectExtractRoundtrip(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, ctx.TraceID, extracted.TraceID)
 	assert.Equal(t, ctx.SpanID, extracted.SpanID)
+}
+
+func TestB3ExtractAccepts64BitTraceIDs(t *testing.T) {
+	expected, err := model.ParseTraceID("00000000000000004bf92f3577b34da6")
+	require.NoError(t, err)
+	spanID, err := model.ParseSpanID("00f067aa0ba902b7")
+	require.NoError(t, err)
+
+	multiHeaders := make(http.Header)
+	multiHeaders.Set("X-B3-TraceId", "4bf92f3577b34da6")
+	multiHeaders.Set("X-B3-SpanId", spanID.String())
+	multiHeaders.Set("X-B3-Sampled", "1")
+
+	extracted, ok := propagation.B3Propagator{}.Extract(multiHeaders)
+	require.True(t, ok)
+	assert.Equal(t, expected, extracted.TraceID)
+	assert.Equal(t, spanID, extracted.SpanID)
+	assert.True(t, extracted.IsSampled)
+
+	singleHeaders := make(http.Header)
+	singleHeaders.Set("b3", "4bf92f3577b34da6-00f067aa0ba902b7-1")
+
+	extracted, ok = (propagation.B3Propagator{SingleHeader: true}).Extract(singleHeaders)
+	require.True(t, ok)
+	assert.Equal(t, expected, extracted.TraceID)
+	assert.Equal(t, spanID, extracted.SpanID)
+	assert.True(t, extracted.IsSampled)
 }
 
 func TestComposite_W3CTakesPriority(t *testing.T) {

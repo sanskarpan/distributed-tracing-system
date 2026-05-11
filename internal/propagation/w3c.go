@@ -1,6 +1,7 @@
 package propagation
 
 import (
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strings"
@@ -29,17 +30,16 @@ func (W3CPropagator) Extract(headers http.Header) (SpanContext, bool) {
 		return SpanContext{}, false
 	}
 	parts := strings.SplitN(val, "-", 4)
-	if len(parts) != 4 || parts[0] != "00" || len(parts[1]) != 32 || len(parts[2]) != 16 {
+	if len(parts) != 4 || parts[0] != "00" || len(parts[1]) != 32 || len(parts[2]) != 16 || len(parts[3]) != 2 {
 		return SpanContext{}, false
 	}
 	traceID, err1 := model.ParseTraceID(parts[1])
 	spanID, err2 := model.ParseSpanID(parts[2])
-	if err1 != nil || err2 != nil {
+	flags, err3 := hex.DecodeString(parts[3])
+	if err1 != nil || err2 != nil || err3 != nil || len(flags) != 1 {
 		return SpanContext{}, false
 	}
-	// flags: last character's LSB is the sampled bit
-	flagStr := parts[3]
-	sampled := len(flagStr) >= 2 && flagStr[len(flagStr)-1]&1 != 0
+	sampled := flags[0]&0x01 == 0x01
 	return SpanContext{
 		TraceID:    traceID,
 		SpanID:     spanID,

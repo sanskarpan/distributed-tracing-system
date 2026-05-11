@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // TraceID is a 128-bit OpenTelemetry-compatible trace identifier.
@@ -85,6 +86,20 @@ func ParseTraceID(s string) (TraceID, error) {
 	var id TraceID
 	copy(id[:], b)
 	return id, nil
+}
+
+// ParseTraceID64Or128 parses a 64-bit or 128-bit hex trace ID.
+// 64-bit IDs are left-padded with zeros to preserve interoperability
+// with Zipkin/B3 producers that still emit 16-character trace IDs.
+func ParseTraceID64Or128(s string) (TraceID, error) {
+	switch len(s) {
+	case 16:
+		return ParseTraceID(strings.Repeat("0", 16) + s)
+	case 32:
+		return ParseTraceID(s)
+	default:
+		return TraceID{}, fmt.Errorf("trace ID must be 16 or 32 hex chars, got %d", len(s))
+	}
 }
 
 // ParseSpanID parses a 16-character hex string into a SpanID.

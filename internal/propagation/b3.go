@@ -46,7 +46,7 @@ func (p B3Propagator) extractMulti(headers http.Header) (SpanContext, bool) {
 	if traceIDStr == "" || spanIDStr == "" {
 		return SpanContext{}, false
 	}
-	traceID, err := model.ParseTraceID(traceIDStr)
+	traceID, err := model.ParseTraceID64Or128(traceIDStr)
 	if err != nil {
 		return SpanContext{}, false
 	}
@@ -72,7 +72,7 @@ func (p B3Propagator) extractSingle(headers http.Header) (SpanContext, bool) {
 	if len(parts) < 3 {
 		return SpanContext{}, false
 	}
-	traceID, err := model.ParseTraceID(parts[0])
+	traceID, err := model.ParseTraceID64Or128(parts[0])
 	if err != nil {
 		return SpanContext{}, false
 	}
