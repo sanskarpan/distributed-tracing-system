@@ -25,7 +25,12 @@ export function TimelinePage() {
 
   useEffect(() => { loadTraces() }, [loadTraces])
 
-  useSSE('/sse/traces', loadTraces)
+  useSSE('/sse/traces', (event: unknown) => {
+    const e = event as { type?: string }
+    if (e.type === 'trace') {
+      loadTraces()
+    }
+  })
 
   const draw = useCallback(() => {
     if (!svgRef.current || traces.length === 0) return
