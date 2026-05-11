@@ -22,70 +22,70 @@ func SetupRoutes(ctx context.Context, r *chi.Mux, pipeline *Pipeline, store stor
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Compress(5, "application/json", "text/plain", "text/html"))
 	r.Use(CORS)
-	r.Use(APIKeyAuth(apiKey))
 
-	// Health probes and API spec (unauthenticated)
+	// Public endpoints
 	r.Get("/healthz", HandleHealthz)
 	r.Get("/readyz", HandleReadyz)
 	r.Get("/openapi.yaml", HandleOpenAPI)
-
-	// Prometheus self-observability metrics
 	r.Get("/metrics", NewPrometheusHandler(metricsStore, pipeline).ServeHTTP)
-
-	// Frontend configuration
 	r.Get("/api/v1/config", HandleConfig)
-
-	// Collector stats
-	r.Get("/api/v1/stats", func(w http.ResponseWriter, r *http.Request) {
-		sampled, dropped := pipeline.Stats()
-		storeStats := store.Stats()
-		writeJSON(w, map[string]any{
-			"sampledTotal":    sampled,
-			"droppedTotal":    dropped,
-			"workerQueueDepth": pipeline.QueueDepth(),
-			"traceCount":      storeStats.TraceCount,
-			"maxTraces":       storeStats.MaxSize,
-		})
-	})
 
 	ingest := NewIngestHandler(pipeline)
 	query := NewQueryHandler(store, pipeline)
 	metricsH := NewMetricsHandler(metricsStore)
 	samplerH := NewSamplerHandler(pipeline)
 
-	// Ingest
-	r.Post("/api/v1/spans", ingest.HandleNativeSpans)
-	r.Post("/v1/traces", ingest.HandleOTLPTraces)
-	r.Post("/api/v2/spans", ingest.HandleZipkinSpans) // Zipkin v2 JSON
-
-	// Query
-	r.Get("/api/v1/traces", query.HandleListTraces)
-	r.Get("/api/v1/traces/compare", query.HandleCompareTraces)
-	r.Get("/api/v1/traces/{traceId}", query.HandleGetTrace)
-	r.Get("/api/v1/traces/{traceId}/export", query.HandleExportTrace)
-	r.Get("/api/v1/services", query.HandleGetServices)
-	r.Get("/api/v1/operations", query.HandleGetOperations)
-	r.Get("/api/v1/dependencies", query.HandleGetDependencies)
-
-	// Metrics
-	r.Get("/api/v1/metrics/red", metricsH.HandleREDMetrics)
-	r.Get("/api/v1/metrics/heatmap", metricsH.HandleHeatmap)
-	r.Get("/api/v1/metrics/anomalies", metricsH.HandleAnomalies)
-	r.Get("/api/v1/metrics/slo", metricsH.HandleSLOs)
-
-	// Sampler
-	r.Get("/api/v1/sampler", samplerH.HandleGetSampler)
-	r.Put("/api/v1/sampler", samplerH.HandlePutSampler)
-
 	// SSE — separate buses per stream type so each endpoint only receives its own events.
 	// sseBus receives span + trace events from the pipeline.
 	metricsBus := NewSSEBus()
 	samplerBus := NewSSEBus()
 
-	r.Get("/sse/spans", sseBus.ServeSSE)
-	r.Get("/sse/traces", sseBus.ServeSSE)
-	r.Get("/sse/metrics", metricsBus.ServeSSE)
-	r.Get("/sse/sampler", samplerBus.ServeSSE)
+	r.Group(func(protected chi.Router) {
+		protected.Use(APIKeyAuth(apiKey))
+
+		// Collector stats
+		protected.Get("/api/v1/stats", func(w http.ResponseWriter, r *http.Request) {
+			sampled, dropped := pipeline.Stats()
+			storeStats := store.Stats()
+			writeJSON(w, map[string]any{
+				"sampledTotal":    sampled,
+				"droppedTotal":    dropped,
+				"workerQueueDepth": pipeline.QueueDepth(),
+				"traceCount":      storeStats.TraceCount,
+				"maxTraces":       storeStats.MaxSize,
+			})
+		})
+
+		// Ingest
+		protected.Post("/api/v1/spans", ingest.HandleNativeSpans)
+		protected.Post("/v1/traces", ingest.HandleOTLPTraces)
+		protected.Post("/api/v2/spans", ingest.HandleZipkinSpans) // Zipkin v2 JSON
+
+		// Query
+		protected.Get("/api/v1/traces", query.HandleListTraces)
+		protected.Get("/api/v1/traces/compare", query.HandleCompareTraces)
+		protected.Get("/api/v1/traces/{traceId}", query.HandleGetTrace)
+		protected.Get("/api/v1/traces/{traceId}/export", query.HandleExportTrace)
+		protected.Get("/api/v1/services", query.HandleGetServices)
+		protected.Get("/api/v1/operations", query.HandleGetOperations)
+		protected.Get("/api/v1/dependencies", query.HandleGetDependencies)
+
+		// Metrics
+		protected.Get("/api/v1/metrics/red", metricsH.HandleREDMetrics)
+		protected.Get("/api/v1/metrics/heatmap", metricsH.HandleHeatmap)
+		protected.Get("/api/v1/metrics/anomalies", metricsH.HandleAnomalies)
+		protected.Get("/api/v1/metrics/slo", metricsH.HandleSLOs)
+
+		// Sampler
+		protected.Get("/api/v1/sampler", samplerH.HandleGetSampler)
+		protected.Put("/api/v1/sampler", samplerH.HandlePutSampler)
+
+		// SSE
+		protected.Get("/sse/spans", sseBus.ServeSSE)
+		protected.Get("/sse/traces", sseBus.ServeSSE)
+		protected.Get("/sse/metrics", metricsBus.ServeSSE)
+		protected.Get("/sse/sampler", samplerBus.ServeSSE)
+	})
 
 	// Broadcast a metrics tick every second so the Metrics page refreshes live.
 	go func() {
@@ -133,4 +133,3 @@ func NewPipelineWithDefaults(store storage.TraceStore, metricsStore *metrics.Met
 	analyzer := analysis.NewAnalyzer()
 	return NewPipeline(store, metricsStore, sseBus, s, analyzer)
 }
-

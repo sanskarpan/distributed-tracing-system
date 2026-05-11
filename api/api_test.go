@@ -24,6 +24,11 @@ import (
 // testServer builds a fully wired httptest.Server with a short assembler timeout.
 func testServer(t *testing.T) *httptest.Server {
 	t.Helper()
+	return testServerWithAPIKey(t, "")
+}
+
+func testServerWithAPIKey(t *testing.T, apiKey string) *httptest.Server {
+	t.Helper()
 	store := storage.NewMemoryStore(10000)
 	metricsStore := metrics.NewMetricsStore()
 	sseBus := api.NewSSEBus()
@@ -35,7 +40,7 @@ func testServer(t *testing.T) *httptest.Server {
 	t.Cleanup(cancel)
 
 	r := chi.NewRouter()
-	api.SetupRoutes(ctx, r, pipeline, store, metricsStore, sseBus, "" /* no auth */)
+	api.SetupRoutes(ctx, r, pipeline, store, metricsStore, sseBus, apiKey)
 	return httptest.NewServer(r)
 }
 
@@ -577,4 +582,39 @@ func TestAPI_InvalidTailPolicyTypeReturns400(t *testing.T) {
 	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestAPI_PublicProbeAndSpecEndpointsRemainUnauthenticated(t *testing.T) {
+	srv := testServerWithAPIKey(t, "secret")
+	defer srv.Close()
+
+	for _, path := range []string{
+		"/healthz",
+		"/readyz",
+		"/openapi.yaml",
+		"/metrics",
+		"/api/v1/config",
+	} {
+		resp, err := http.Get(srv.URL + path)
+		require.NoError(t, err, "GET %s", path)
+		resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode, "GET %s should remain public", path)
+	}
+}
+
+func TestAPI_ProtectedEndpointsStillRequireAuth(t *testing.T) {
+	srv := testServerWithAPIKey(t, "secret")
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/services")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/services", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	resp2, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp2.Body.Close()
+	assert.Equal(t, http.StatusOK, resp2.StatusCode)
 }
