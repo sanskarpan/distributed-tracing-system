@@ -69,11 +69,17 @@ func (h *SamplerHandler) buildSampler(req SamplerConfigRequest) (sampler.Sampler
 		if req.Rate != nil {
 			rate = *req.Rate
 		}
+		if err := validateRate(rate, "rate"); err != nil {
+			return nil, err
+		}
 		return sampler.NewProbabilistic(rate), nil
 	case "ratelimit":
 		tps := 100.0
 		if req.TracesPerSec != nil {
 			tps = *req.TracesPerSec
+		}
+		if tps <= 0 {
+			return nil, fmt.Errorf("tracesPerSec must be > 0")
 		}
 		return sampler.NewRateLimit(tps), nil
 	case "adaptive":
@@ -88,6 +94,18 @@ func (h *SamplerHandler) buildSampler(req SamplerConfigRequest) (sampler.Sampler
 		}
 		if req.MaxRate != nil {
 			maxRate = *req.MaxRate
+		}
+		if target <= 0 {
+			return nil, fmt.Errorf("targetRate must be > 0")
+		}
+		if err := validateRate(minRate, "minRate"); err != nil {
+			return nil, err
+		}
+		if err := validateRate(maxRate, "maxRate"); err != nil {
+			return nil, err
+		}
+		if minRate > maxRate {
+			return nil, fmt.Errorf("minRate must be <= maxRate")
 		}
 		return sampler.NewAdaptive(target, minRate, maxRate, 5*time.Second), nil
 	case "rules":
@@ -109,9 +127,12 @@ func (h *SamplerHandler) buildSampler(req SamplerConfigRequest) (sampler.Sampler
 					if r.Sampler.Rate != nil {
 						rate = *r.Sampler.Rate
 					}
+					if err := validateRate(rate, "rules[].sampler.rate"); err != nil {
+						return nil, err
+					}
 					rule.Sampler = sampler.NewProbabilistic(rate)
 				default:
-					rule.Decision = sampler.Sample
+					return nil, fmt.Errorf("unknown rules[].sampler.type %q", r.Sampler.Type)
 				}
 			} else {
 				rule.Decision = sampler.Sample
@@ -124,7 +145,13 @@ func (h *SamplerHandler) buildSampler(req SamplerConfigRequest) (sampler.Sampler
 		if req.BufferTimeoutSec != nil {
 			timeout = *req.BufferTimeoutSec
 		}
-		policies := buildTailPolicies(req.Policies)
+		if timeout <= 0 {
+			return nil, fmt.Errorf("bufferTimeoutSec must be > 0")
+		}
+		policies, err := buildTailPolicies(req.Policies)
+		if err != nil {
+			return nil, err
+		}
 		pipeline := h.pipeline
 		accept := func(spans []*model.Span) {
 			for _, sp := range spans {
@@ -143,7 +170,7 @@ func (h *SamplerHandler) buildSampler(req SamplerConfigRequest) (sampler.Sampler
 	}
 }
 
-func buildTailPolicies(dtos []TailPolicyDTO) []sampler.TailPolicy {
+func buildTailPolicies(dtos []TailPolicyDTO) ([]sampler.TailPolicy, error) {
 	policies := make([]sampler.TailPolicy, 0, len(dtos))
 	for _, dto := range dtos {
 		switch dto.Type {
@@ -154,6 +181,9 @@ func buildTailPolicies(dtos []TailPolicyDTO) []sampler.TailPolicy {
 			if dto.ThresholdMs != nil {
 				threshold = *dto.ThresholdMs
 			}
+			if threshold <= 0 {
+				return nil, fmt.Errorf("tail latency thresholdMs must be > 0")
+			}
 			policies = append(policies, sampler.LatencyPolicy{
 				Threshold: time.Duration(threshold * float64(time.Millisecond)),
 			})
@@ -162,8 +192,20 @@ func buildTailPolicies(dtos []TailPolicyDTO) []sampler.TailPolicy {
 			if dto.Rate != nil {
 				rate = *dto.Rate
 			}
+			if err := validateRate(rate, "tail probabilistic rate"); err != nil {
+				return nil, err
+			}
 			policies = append(policies, sampler.NewProbabilisticTailPolicy(rate))
+		default:
+			return nil, fmt.Errorf("unknown tail policy type %q", dto.Type)
 		}
 	}
-	return policies
+	return policies, nil
+}
+
+func validateRate(v float64, field string) error {
+	if v < 0 || v > 1 {
+		return fmt.Errorf("%s must be between 0 and 1", field)
+	}
+	return nil
 }

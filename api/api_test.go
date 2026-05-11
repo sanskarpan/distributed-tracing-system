@@ -484,3 +484,59 @@ func TestAPI_RulesSamplerPutThenGet(t *testing.T) {
 	require.NoError(t, json.NewDecoder(resp2.Body).Decode(&config))
 	assert.Equal(t, "rules", config["type"], "sampler type must be rules, not always")
 }
+
+func TestAPI_InvalidRuleNestedSamplerTypeReturns400(t *testing.T) {
+	srv := testServer(t)
+	defer srv.Close()
+
+	body, _ := json.Marshal(map[string]any{
+		"type": "rules",
+		"rules": []map[string]any{
+			{
+				"operationGlob": "*",
+				"priority":      1,
+				"sampler":       map[string]any{"type": "bogus"},
+			},
+		},
+	})
+	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/api/v1/sampler", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestAPI_InvalidProbabilisticSamplerRateReturns400(t *testing.T) {
+	srv := testServer(t)
+	defer srv.Close()
+
+	body, _ := json.Marshal(map[string]any{"type": "probabilistic", "rate": 1.5})
+	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/api/v1/sampler", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestAPI_InvalidTailPolicyTypeReturns400(t *testing.T) {
+	srv := testServer(t)
+	defer srv.Close()
+
+	body, _ := json.Marshal(map[string]any{
+		"type": "tail",
+		"policies": []map[string]any{
+			{"type": "mystery"},
+		},
+	})
+	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/api/v1/sampler", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
