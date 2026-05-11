@@ -218,3 +218,20 @@ func (a *Assembler) PendingCount() int {
 	defer a.mu.Unlock()
 	return len(a.pending)
 }
+
+// Stop flushes all pending traces immediately and stops their quiet-period timers.
+func (a *Assembler) Stop() {
+	a.mu.Lock()
+	ids := make([]model.TraceID, 0, len(a.pending))
+	for traceID, pt := range a.pending {
+		if pt.timer != nil {
+			pt.timer.Stop()
+		}
+		ids = append(ids, traceID)
+	}
+	a.mu.Unlock()
+
+	for _, traceID := range ids {
+		a.finalize(traceID)
+	}
+}

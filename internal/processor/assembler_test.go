@@ -252,3 +252,24 @@ func TestAssembler_PendingCount(t *testing.T) {
 	assert.Equal(t, 2, completed)
 	mu.Unlock()
 }
+
+func TestAssembler_StopFlushesPendingTraces(t *testing.T) {
+	ch := make(chan *model.Trace, 1)
+	a := NewAssembler(10*time.Second, func(tr *model.Trace) {
+		ch <- tr
+	})
+
+	traceID := newTraceID(t)
+	spanID := newSpanID(t)
+	now := time.Now()
+
+	a.AddSpan(makeSpan(traceID, spanID, model.SpanID{}, "svc-a", "op", now, now.Add(100*time.Millisecond)))
+	assert.Equal(t, 1, a.PendingCount())
+
+	a.Stop()
+
+	tr := waitForTrace(ch, 500*time.Millisecond)
+	require.NotNil(t, tr, "expected Stop to flush pending traces")
+	assert.Equal(t, traceID, tr.TraceID)
+	assert.Equal(t, 0, a.PendingCount())
+}
