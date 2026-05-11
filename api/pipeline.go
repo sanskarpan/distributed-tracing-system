@@ -30,9 +30,20 @@ type Pipeline struct {
 
 	shutdownOnce sync.Once
 
+	traceDecisionMu         sync.Mutex
+	traceDecisions          map[model.TraceID]traceSamplingDecision
+	traceDecisionTTL        time.Duration
+	traceDecisionSweepEvery time.Duration
+	lastTraceDecisionSweep  time.Time
+
 	// Stats
 	sampledTotal int64
 	droppedTotal int64
+}
+
+type traceSamplingDecision struct {
+	result    sampler.SamplingResult
+	expiresAt time.Time
 }
 
 // workerCount is the number of parallel span-processing goroutines.
@@ -50,13 +61,16 @@ func NewPipeline(store storage.TraceStore, metricsStore *metrics.MetricsStore,
 	}
 
 	p := &Pipeline{
-		sampler:  s,
-		enricher: &processor.Enricher{},
-		store:    store,
-		metrics:  metricsStore,
-		sseBus:   sseBus,
-		analyzer: analyzer,
-		workCh:   make(chan *model.Span, workerQueueDepth),
+		sampler:                 s,
+		enricher:                &processor.Enricher{},
+		store:                   store,
+		metrics:                 metricsStore,
+		sseBus:                  sseBus,
+		analyzer:                analyzer,
+		workCh:                  make(chan *model.Span, workerQueueDepth),
+		traceDecisions:          make(map[model.TraceID]traceSamplingDecision),
+		traceDecisionTTL:        maxDuration(30*time.Second, timeout*4),
+		traceDecisionSweepEvery: maxDuration(5*time.Second, timeout*2),
 	}
 
 	p.assembler = processor.NewAssembler(timeout, func(trace *model.Trace) {
@@ -73,6 +87,8 @@ func NewPipeline(store storage.TraceStore, metricsStore *metrics.MetricsStore,
 		// Broadcast SSE
 		summary := traceToSummarySSE(trace)
 		sseBus.Broadcast(SSEEvent{Type: "trace", Data: summary})
+
+		p.clearTraceDecision(trace.TraceID)
 	})
 
 	// Start worker pool
@@ -99,6 +115,17 @@ func (p *Pipeline) StartWithContext(ctx context.Context) {
 
 // IngestSpans validates, samples, enriches, and assembles spans.
 func (p *Pipeline) IngestSpans(spans []*model.Span) (accepted, dropped int, err error) {
+	rootSpans := make(map[model.TraceID]*model.Span)
+	for _, span := range spans {
+		if !span.IsRoot() {
+			continue
+		}
+		root, ok := rootSpans[span.TraceID]
+		if !ok || (!span.StartTime.IsZero() && (root.StartTime.IsZero() || span.StartTime.Before(root.StartTime))) {
+			rootSpans[span.TraceID] = span
+		}
+	}
+
 	for _, span := range spans {
 		// Validate
 		if span.TraceID.IsZero() {
@@ -122,15 +149,7 @@ func (p *Pipeline) IngestSpans(spans []*model.Span) (accepted, dropped int, err 
 			continue
 		}
 
-		result := s.ShouldSample(sampler.SamplingParameters{
-			TraceID:       span.TraceID,
-			SpanID:        span.SpanID,
-			ParentSpanID:  span.ParentSpanID,
-			OperationName: span.Name,
-			ServiceName:   span.ServiceName,
-			Kind:          span.Kind,
-			Attributes:    span.Attributes,
-		})
+		result := p.traceSamplingDecisionForSpan(s, span, rootSpans[span.TraceID])
 
 		if result.Decision == sampler.Drop {
 			atomic.AddInt64(&p.droppedTotal, 1)
@@ -165,6 +184,8 @@ func (p *Pipeline) SwapSampler(s sampler.Sampler) {
 	p.sampler = s
 	p.mu.Unlock()
 
+	p.clearAllTraceDecisions()
+
 	if stopper, ok := old.(interface{ Stop() }); ok {
 		stopper.Stop()
 	}
@@ -185,6 +206,77 @@ func (p *Pipeline) Stats() (sampled, dropped int64) {
 // QueueDepth returns the number of spans currently waiting in the worker pool queue.
 func (p *Pipeline) QueueDepth() int {
 	return len(p.workCh)
+}
+
+func (p *Pipeline) traceSamplingDecisionForSpan(s sampler.Sampler, span *model.Span, root *model.Span) sampler.SamplingResult {
+	decisionSpan := span
+	if root != nil {
+		decisionSpan = root
+	}
+
+	now := time.Now()
+
+	p.traceDecisionMu.Lock()
+	defer p.traceDecisionMu.Unlock()
+
+	p.sweepExpiredTraceDecisionsLocked(now)
+
+	if cached, ok := p.traceDecisions[span.TraceID]; ok && now.Before(cached.expiresAt) {
+		cached.expiresAt = now.Add(p.traceDecisionTTL)
+		p.traceDecisions[span.TraceID] = cached
+		return cached.result
+	}
+
+	result := s.ShouldSample(samplingParametersFromSpan(decisionSpan))
+	p.traceDecisions[span.TraceID] = traceSamplingDecision{
+		result:    result,
+		expiresAt: now.Add(p.traceDecisionTTL),
+	}
+	return result
+}
+
+func (p *Pipeline) sweepExpiredTraceDecisionsLocked(now time.Time) {
+	if !p.lastTraceDecisionSweep.IsZero() && now.Sub(p.lastTraceDecisionSweep) < p.traceDecisionSweepEvery {
+		return
+	}
+	for traceID, decision := range p.traceDecisions {
+		if now.After(decision.expiresAt) {
+			delete(p.traceDecisions, traceID)
+		}
+	}
+	p.lastTraceDecisionSweep = now
+}
+
+func (p *Pipeline) clearTraceDecision(traceID model.TraceID) {
+	p.traceDecisionMu.Lock()
+	delete(p.traceDecisions, traceID)
+	p.traceDecisionMu.Unlock()
+}
+
+func (p *Pipeline) clearAllTraceDecisions() {
+	p.traceDecisionMu.Lock()
+	clear(p.traceDecisions)
+	p.lastTraceDecisionSweep = time.Time{}
+	p.traceDecisionMu.Unlock()
+}
+
+func samplingParametersFromSpan(span *model.Span) sampler.SamplingParameters {
+	return sampler.SamplingParameters{
+		TraceID:       span.TraceID,
+		SpanID:        span.SpanID,
+		ParentSpanID:  span.ParentSpanID,
+		OperationName: span.Name,
+		ServiceName:   span.ServiceName,
+		Kind:          span.Kind,
+		Attributes:    span.Attributes,
+	}
+}
+
+func maxDuration(left, right time.Duration) time.Duration {
+	if left > right {
+		return left
+	}
+	return right
 }
 
 // Shutdown drains worker processing, flushes deferred sampler state,
