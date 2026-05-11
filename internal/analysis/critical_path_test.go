@@ -243,6 +243,110 @@ func TestCompareTraces_AddedSpan(t *testing.T) {
 	assert.Len(t, result.OnlyInBase, 0)
 }
 
+func TestCompareTraces_MatchesRepeatedOperationsByParentPath(t *testing.T) {
+	a := NewAnalyzer()
+	now := time.Now()
+
+	baseRoot := newSpan(t, "api", "root", now, now.Add(300*time.Millisecond))
+	baseCheckout := newSpan(t, "api", "checkout", now.Add(10*time.Millisecond), now.Add(120*time.Millisecond))
+	baseShipping := newSpan(t, "api", "shipping", now.Add(140*time.Millisecond), now.Add(260*time.Millisecond))
+	baseCheckout.ParentSpanID = baseRoot.SpanID
+	baseShipping.ParentSpanID = baseRoot.SpanID
+
+	baseCheckoutDB := newSpan(t, "db", "query", now.Add(20*time.Millisecond), now.Add(60*time.Millisecond))
+	baseShippingDB := newSpan(t, "db", "query", now.Add(150*time.Millisecond), now.Add(230*time.Millisecond))
+	baseCheckoutDB.ParentSpanID = baseCheckout.SpanID
+	baseShippingDB.ParentSpanID = baseShipping.SpanID
+
+	base := &model.Trace{
+		TraceID:   baseRoot.TraceID,
+		Spans:     []*model.Span{baseRoot, baseCheckout, baseShipping, baseCheckoutDB, baseShippingDB},
+		SpanCount: 5,
+		Duration:  300 * time.Millisecond,
+	}
+
+	cmpRoot := newSpan(t, "api", "root", now, now.Add(320*time.Millisecond))
+	cmpCheckout := newSpan(t, "api", "checkout", now.Add(10*time.Millisecond), now.Add(140*time.Millisecond))
+	cmpShipping := newSpan(t, "api", "shipping", now.Add(140*time.Millisecond), now.Add(280*time.Millisecond))
+	cmpCheckout.ParentSpanID = cmpRoot.SpanID
+	cmpShipping.ParentSpanID = cmpRoot.SpanID
+
+	cmpCheckoutDB := newSpan(t, "db", "query", now.Add(20*time.Millisecond), now.Add(90*time.Millisecond))
+	cmpShippingDB := newSpan(t, "db", "query", now.Add(150*time.Millisecond), now.Add(210*time.Millisecond))
+	cmpCheckoutDB.ParentSpanID = cmpCheckout.SpanID
+	cmpShippingDB.ParentSpanID = cmpShipping.SpanID
+
+	cmp := &model.Trace{
+		TraceID:   cmpRoot.TraceID,
+		Spans:     []*model.Span{cmpRoot, cmpShippingDB, cmpCheckoutDB, cmpShipping, cmpCheckout},
+		SpanCount: 5,
+		Duration:  320 * time.Millisecond,
+	}
+
+	result := a.CompareTraces(base, cmp)
+
+	require.Len(t, result.Matched, 5)
+	assert.Contains(t, result.Matched, SpanDiff{
+		BaseSpanID:      baseCheckoutDB.SpanID,
+		CompareSpanID:   cmpCheckoutDB.SpanID,
+		DurationDeltaMs: 30,
+	})
+	assert.Contains(t, result.Matched, SpanDiff{
+		BaseSpanID:      baseShippingDB.SpanID,
+		CompareSpanID:   cmpShippingDB.SpanID,
+		DurationDeltaMs: -20,
+	})
+	assert.Empty(t, result.OnlyInBase)
+	assert.Empty(t, result.OnlyInCompare)
+}
+
+func TestCompareTraces_MatchesRepeatedSiblingsByStartTime(t *testing.T) {
+	a := NewAnalyzer()
+	now := time.Now()
+
+	baseRoot := newSpan(t, "api", "root", now, now.Add(200*time.Millisecond))
+	baseRetry1 := newSpan(t, "worker", "retry", now.Add(10*time.Millisecond), now.Add(30*time.Millisecond))
+	baseRetry2 := newSpan(t, "worker", "retry", now.Add(40*time.Millisecond), now.Add(70*time.Millisecond))
+	baseRetry1.ParentSpanID = baseRoot.SpanID
+	baseRetry2.ParentSpanID = baseRoot.SpanID
+
+	base := &model.Trace{
+		TraceID:   baseRoot.TraceID,
+		Spans:     []*model.Span{baseRoot, baseRetry1, baseRetry2},
+		SpanCount: 3,
+		Duration:  200 * time.Millisecond,
+	}
+
+	cmpRoot := newSpan(t, "api", "root", now, now.Add(210*time.Millisecond))
+	cmpRetry1 := newSpan(t, "worker", "retry", now.Add(10*time.Millisecond), now.Add(35*time.Millisecond))
+	cmpRetry2 := newSpan(t, "worker", "retry", now.Add(40*time.Millisecond), now.Add(90*time.Millisecond))
+	cmpRetry1.ParentSpanID = cmpRoot.SpanID
+	cmpRetry2.ParentSpanID = cmpRoot.SpanID
+
+	cmp := &model.Trace{
+		TraceID:   cmpRoot.TraceID,
+		Spans:     []*model.Span{cmpRoot, cmpRetry2, cmpRetry1},
+		SpanCount: 3,
+		Duration:  210 * time.Millisecond,
+	}
+
+	result := a.CompareTraces(base, cmp)
+
+	require.Len(t, result.Matched, 3)
+	assert.Contains(t, result.Matched, SpanDiff{
+		BaseSpanID:      baseRetry1.SpanID,
+		CompareSpanID:   cmpRetry1.SpanID,
+		DurationDeltaMs: 5,
+	})
+	assert.Contains(t, result.Matched, SpanDiff{
+		BaseSpanID:      baseRetry2.SpanID,
+		CompareSpanID:   cmpRetry2.SpanID,
+		DurationDeltaMs: 20,
+	})
+	assert.Empty(t, result.OnlyInBase)
+	assert.Empty(t, result.OnlyInCompare)
+}
+
 func TestDetectGaps(t *testing.T) {
 	a := NewAnalyzer()
 	now := time.Now()
