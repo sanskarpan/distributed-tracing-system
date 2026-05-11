@@ -8,15 +8,16 @@ import (
 
 // AdaptiveSampler automatically adjusts sampling probability to maintain target throughput.
 type AdaptiveSampler struct {
-	mu           sync.Mutex
-	targetRate   float64
-	minRate      float64
-	maxRate      float64
-	adjustPeriod time.Duration
-	inner        *ProbabilisticSampler
-	window       *SlidingWindow
-	deviations   int
-	stopCh       chan struct{}
+	mu            sync.Mutex
+	targetRate    float64
+	minRate       float64
+	maxRate       float64
+	adjustPeriod  time.Duration
+	inner         *ProbabilisticSampler
+	attemptWindow *SlidingWindow
+	sampledWindow *SlidingWindow
+	deviations    int
+	stopCh        chan struct{}
 }
 
 // NewAdaptive creates an AdaptiveSampler targeting the given traces/second.
@@ -32,13 +33,14 @@ func NewAdaptive(targetRate, minRate, maxRate float64, adjustPeriod time.Duratio
 	}
 	initialRate := math.Min(maxRate, math.Max(minRate, 0.1))
 	a := &AdaptiveSampler{
-		targetRate:   targetRate,
-		minRate:      minRate,
-		maxRate:      maxRate,
-		adjustPeriod: adjustPeriod,
-		inner:        NewProbabilistic(initialRate),
-		window:       &SlidingWindow{},
-		stopCh:       make(chan struct{}),
+		targetRate:    targetRate,
+		minRate:       minRate,
+		maxRate:       maxRate,
+		adjustPeriod:  adjustPeriod,
+		inner:         NewProbabilistic(initialRate),
+		attemptWindow: &SlidingWindow{},
+		sampledWindow: &SlidingWindow{},
+		stopCh:        make(chan struct{}),
 	}
 	go a.run()
 	return a
@@ -58,16 +60,27 @@ func (a *AdaptiveSampler) run() {
 }
 
 func (a *AdaptiveSampler) adjust() {
-	observed := a.window.Rate()
-	if observed == 0 {
+	attempted := a.attemptWindow.Rate()
+	if attempted == 0 {
 		return
 	}
-	ratio := a.targetRate / observed
-	deviation := math.Abs(ratio - 1.0)
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	sampled := a.sampledWindow.Rate()
+	if sampled == 0 {
+		a.deviations++
+		if a.deviations < 3 {
+			return
+		}
+		a.inner.SetRate(a.maxRate)
+		a.deviations = 0
+		return
+	}
+
+	ratio := a.targetRate / sampled
+	deviation := math.Abs(ratio - 1.0)
 	if deviation < 0.10 {
 		a.deviations = 0
 		return
@@ -83,8 +96,12 @@ func (a *AdaptiveSampler) adjust() {
 }
 
 func (a *AdaptiveSampler) ShouldSample(p SamplingParameters) SamplingResult {
-	a.window.Add(1)
-	return a.inner.ShouldSample(p)
+	a.attemptWindow.Add(1)
+	result := a.inner.ShouldSample(p)
+	if result.Decision != Drop {
+		a.sampledWindow.Add(1)
+	}
+	return result
 }
 
 // Stop shuts down the background adjustment goroutine.
@@ -101,5 +118,7 @@ func (a *AdaptiveSampler) Config() map[string]any {
 		"currentRate": a.inner.GetRate(),
 		"minRate":     a.minRate,
 		"maxRate":     a.maxRate,
+		"attemptRate": a.attemptWindow.Rate(),
+		"sampledRate": a.sampledWindow.Rate(),
 	}
 }
