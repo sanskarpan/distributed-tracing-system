@@ -443,19 +443,30 @@ func traceMatchesAttributeKV(tr *model.Trace, filter string) bool {
 			if !hasEq {
 				return true
 			}
-			var valStr string
-			switch kv.Type {
-			case model.ValueString:
-				valStr = strings.ToLower(kv.SVal)
-			default:
-				valStr = fmt.Sprintf("%v", kv.IVal)
-			}
+			valStr := strings.ToLower(formatAttributeValue(kv))
 			if strings.Contains(valStr, filterVal) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func formatAttributeValue(kv model.KeyValue) string {
+	switch kv.Type {
+	case model.ValueString:
+		return kv.SVal
+	case model.ValueInt:
+		return fmt.Sprintf("%d", kv.IVal)
+	case model.ValueFloat:
+		return fmt.Sprintf("%v", kv.FVal)
+	case model.ValueBool:
+		return fmt.Sprintf("%t", kv.BVal)
+	case model.ValueStringSlice:
+		return strings.Join(kv.SArr, ",")
+	default:
+		return ""
+	}
 }
 
 // operationFromKey extracts the operation name from a "service:operation" index key.

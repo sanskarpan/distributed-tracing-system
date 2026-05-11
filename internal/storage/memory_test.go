@@ -266,3 +266,38 @@ func TestMemoryStore_Operations(t *testing.T) {
 	ops := store.Operations("svc")
 	assert.Equal(t, []string{"op-1", "op-2", "op-3"}, ops)
 }
+
+func TestMemoryStore_QueryByAttributeValueTypes(t *testing.T) {
+	store := NewMemoryStore(100)
+	now := time.Now()
+
+	makeTrace := func(attrs ...model.KeyValue) *model.Trace {
+		id := makeTraceID(t)
+		tr := buildTrace(id, "svc", "op", 10*time.Millisecond, false, now)
+		tr.Spans[0].Attributes = attrs
+		return tr
+	}
+
+	require.NoError(t, store.Upsert(makeTrace(model.StringKV("http.method", "GET"))))
+	require.NoError(t, store.Upsert(makeTrace(model.BoolKV("cache.hit", false))))
+	require.NoError(t, store.Upsert(makeTrace(model.FloatKV("retry.backoff", 12.5))))
+	require.NoError(t, store.Upsert(makeTrace(model.IntKV("http.status_code", 503))))
+
+	cases := []struct {
+		name   string
+		filter string
+	}{
+		{name: "string", filter: "http.method=get"},
+		{name: "bool", filter: "cache.hit=false"},
+		{name: "float", filter: "retry.backoff=12.5"},
+		{name: "int", filter: "http.status_code=503"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := store.Query(&TraceQuery{AttributeKV: tc.filter, Limit: 10})
+			require.NoError(t, err)
+			require.Len(t, res.Traces, 1, "filter %q should match exactly one trace", tc.filter)
+		})
+	}
+}
