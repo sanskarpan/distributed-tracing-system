@@ -34,7 +34,7 @@ func parseZipkinSpan(raw map[string]any) *model.Span {
 	traceIDStr, _ := raw["traceId"].(string)
 	spanIDStr, _ := raw["id"].(string)
 
-	traceID, err := model.ParseTraceID(traceIDStr)
+	traceID, err := model.ParseTraceID64Or128(traceIDStr)
 	if err != nil {
 		return nil
 	}
@@ -112,4 +112,3 @@ func zipkinServiceName(raw map[string]any) string {
 	}
 	return "unknown"
 }
-

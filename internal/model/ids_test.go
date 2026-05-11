@@ -36,12 +36,36 @@ func TestTraceID_ParseRejectsInvalid(t *testing.T) {
 		"",
 		"abc",
 		"4bf92f3577b34da6a3ce929d0e0e473",   // 31 chars
-		"4bf92f3577b34da6a3ce929d0e0e47366",  // 33 chars
-		"4bf92f3577b34da6a3ce929d0e0e473g",   // non-hex
-		"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",   // non-hex 32
+		"4bf92f3577b34da6a3ce929d0e0e47366", // 33 chars
+		"4bf92f3577b34da6a3ce929d0e0e473g",  // non-hex
+		"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",  // non-hex 32
 	}
 	for _, s := range cases {
 		_, err := model.ParseTraceID(s)
+		assert.Error(t, err, "expected error for %q", s)
+	}
+}
+
+func TestTraceID_Parse64Or128AcceptsZipkinStyleIDs(t *testing.T) {
+	parsed64, err := model.ParseTraceID64Or128("4bf92f3577b34da6")
+	require.NoError(t, err)
+	assert.Equal(t, "00000000000000004bf92f3577b34da6", parsed64.String())
+
+	parsed128, err := model.ParseTraceID64Or128("4bf92f3577b34da6a3ce929d0e0e4736")
+	require.NoError(t, err)
+	assert.Equal(t, "4bf92f3577b34da6a3ce929d0e0e4736", parsed128.String())
+}
+
+func TestTraceID_Parse64Or128RejectsInvalid(t *testing.T) {
+	cases := []string{
+		"",
+		"abc",
+		"4bf92f3577b34da",
+		"4bf92f3577b34da6g",
+		"4bf92f3577b34da6a3ce929d0e0e47366",
+	}
+	for _, s := range cases {
+		_, err := model.ParseTraceID64Or128(s)
 		assert.Error(t, err, "expected error for %q", s)
 	}
 }
@@ -60,7 +84,7 @@ func TestSpanID_ParseRoundtrip(t *testing.T) {
 func TestSpanID_ParseRejectsInvalid(t *testing.T) {
 	cases := []string{
 		"",
-		"00f067aa0ba902",   // 14 chars
+		"00f067aa0ba902",    // 14 chars
 		"00f067aa0ba902b7f", // 17 chars
 		"00f067aa0ba902gz",  // non-hex
 	}

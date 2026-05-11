@@ -186,17 +186,17 @@ func TestAPI_DependenciesNonEmpty(t *testing.T) {
 					"status":            map[string]any{"code": 0, "message": ""},
 				},
 				{
-					"traceId":      traceID.String(),
-					"spanId":       clientID.String(),
-					"parentSpanId": rootID.String(),
-					"name":         "call downstream",
-					"kind":         3, // Client
-					"serviceName":  "upstream-svc",
+					"traceId":           traceID.String(),
+					"spanId":            clientID.String(),
+					"parentSpanId":      rootID.String(),
+					"name":              "call downstream",
+					"kind":              3, // Client
+					"serviceName":       "upstream-svc",
 					"startTimeUnixNano": uint64(now.Add(10 * time.Millisecond).UnixNano()),
 					"endTimeUnixNano":   uint64(now.Add(180 * time.Millisecond).UnixNano()),
 					"attributes": []any{
 						map[string]any{
-							"key":   "peer.service",
+							"key":         "peer.service",
 							"stringValue": "downstream-svc",
 						},
 					},
@@ -224,6 +224,44 @@ func TestAPI_DependenciesNonEmpty(t *testing.T) {
 	assert.Equal(t, "upstream-svc", edge["caller"])
 	assert.Equal(t, "downstream-svc", edge["callee"])
 	assert.Equal(t, float64(3), edge["count"])
+}
+
+func TestAPI_ZipkinAccepts64BitTraceIDs(t *testing.T) {
+	srv := testServer(t)
+	defer srv.Close()
+
+	body, err := json.Marshal([]map[string]any{
+		{
+			"traceId":   "4bf92f3577b34da6",
+			"id":        "00f067aa0ba902b7",
+			"name":      "zipkin-root",
+			"kind":      "SERVER",
+			"timestamp": float64(time.Now().UnixMicro()),
+			"duration":  float64(5000),
+			"localEndpoint": map[string]any{
+				"serviceName": "zipkin-svc",
+			},
+			"tags": map[string]any{},
+		},
+	})
+	require.NoError(t, err)
+
+	resp, err := http.Post(srv.URL+"/api/v2/spans", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusAccepted, resp.StatusCode)
+
+	time.Sleep(120 * time.Millisecond)
+
+	resp, err = http.Get(srv.URL + "/api/v1/traces/00000000000000004bf92f3577b34da6")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var detail map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&detail))
+	assert.Equal(t, "00000000000000004bf92f3577b34da6", detail["traceId"])
+	assert.Equal(t, float64(1), detail["spanCount"])
 }
 
 // TestAPI_SamplerPutThenGet verifies that PUT /api/v1/sampler changes the sampler type.
