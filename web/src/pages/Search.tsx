@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { useSearch } from '@/hooks/useSearch'
+import { useSearch, type SearchFilters } from '@/hooks/useSearch'
 import { useSSE } from '@/hooks/useSSE'
 import { useTracingStore } from '@/store/tracingStore'
 import { TraceCard } from '@/components/search/TraceCard'
@@ -12,6 +12,33 @@ import type { TraceSummaryDTO } from '@/types'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 
 const PAGE_SIZE = 20
+
+export function hasActiveSearchFilters(filters: SearchFilters): boolean {
+  return Boolean(
+    filters.service ||
+      filters.operation ||
+      filters.attr ||
+      (filters.status && filters.status !== 'all') ||
+      filters.minDuration !== undefined ||
+      filters.maxDuration !== undefined ||
+      filters.timeRangeMinutes
+  )
+}
+
+export function mergeUniqueTraces(...groups: TraceSummaryDTO[][]): TraceSummaryDTO[] {
+  const merged: TraceSummaryDTO[] = []
+  const seen = new Set<string>()
+
+  for (const group of groups) {
+    for (const trace of group) {
+      if (seen.has(trace.traceId)) continue
+      merged.push(trace)
+      seen.add(trace.traceId)
+    }
+  }
+
+  return merged
+}
 
 export function SearchPage() {
   const navigate = useNavigate()
@@ -60,10 +87,14 @@ export function SearchPage() {
   })
 
   const queryTraces = results?.traces ?? []
-  const allTraces = [...liveTraces, ...queryTraces].slice(0, 500)
+  const currentOffset = filters.offset ?? 0
+  const includeLiveTraces = !hasActiveSearchFilters(filters) && currentOffset === 0
+  const allTraces = mergeUniqueTraces(
+    includeLiveTraces ? liveTraces : [],
+    queryTraces
+  ).slice(0, 500)
   const maxDuration = Math.max(...allTraces.map(t => t.durationMs), 1)
   const hasMore = results?.hasMore ?? false
-  const currentOffset = filters.offset ?? 0
 
   const loadMore = () => {
     setFilters({ ...filters, offset: currentOffset + PAGE_SIZE })
