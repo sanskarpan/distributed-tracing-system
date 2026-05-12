@@ -604,6 +604,23 @@ func TestAPI_PublicProbeAndSpecEndpointsRemainUnauthenticated(t *testing.T) {
 	}
 }
 
+func TestAPI_ReadyzReturns503WhenCollectorIsDraining(t *testing.T) {
+	probes := api.NewProbeState()
+	probes.MarkDraining()
+
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec := httptest.NewRecorder()
+	probes.HandleReadyz(rec, req)
+
+	resp := rec.Result()
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	assert.Equal(t, "draining", body["status"])
+}
+
 func TestAPI_ProtectedEndpointsStillRequireAuth(t *testing.T) {
 	srv := testServerWithAPIKey(t, "secret")
 	defer srv.Close()
