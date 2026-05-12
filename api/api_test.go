@@ -1,12 +1,14 @@
 package api_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -617,4 +619,50 @@ func TestAPI_ProtectedEndpointsStillRequireAuth(t *testing.T) {
 	require.NoError(t, err)
 	defer resp2.Body.Close()
 	assert.Equal(t, http.StatusOK, resp2.StatusCode)
+}
+
+func TestAPI_TraceSSEEndpointOnlyEmitsTraceEvents(t *testing.T) {
+	srv := testServer(t)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/sse/traces")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	reader := bufio.NewReader(resp.Body)
+	_, _, body := spanBody(t)
+
+	done := make(chan struct{})
+	go func() {
+		ingestAndWait(t, srv, body)
+		close(done)
+	}()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for trace SSE event")
+		default:
+		}
+
+		line, err := reader.ReadString('\n')
+		require.NoError(t, err)
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data: "))
+		if strings.Contains(payload, `"type":"ping"`) {
+			continue
+		}
+		if strings.Contains(payload, `"type":"span"`) {
+			t.Fatalf("trace stream must not emit span events: %s", payload)
+		}
+		if strings.Contains(payload, `"type":"trace"`) {
+			<-done
+			return
+		}
+	}
 }

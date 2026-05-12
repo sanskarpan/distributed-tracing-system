@@ -48,11 +48,11 @@ func SetupRoutes(ctx context.Context, r *chi.Mux, pipeline *Pipeline, store stor
 			sampled, dropped := pipeline.Stats()
 			storeStats := store.Stats()
 			writeJSON(w, map[string]any{
-				"sampledTotal":    sampled,
-				"droppedTotal":    dropped,
+				"sampledTotal":     sampled,
+				"droppedTotal":     dropped,
 				"workerQueueDepth": pipeline.QueueDepth(),
-				"traceCount":      storeStats.TraceCount,
-				"maxTraces":       storeStats.MaxSize,
+				"traceCount":       storeStats.TraceCount,
+				"maxTraces":        storeStats.MaxSize,
 			})
 		})
 
@@ -81,8 +81,12 @@ func SetupRoutes(ctx context.Context, r *chi.Mux, pipeline *Pipeline, store stor
 		protected.Put("/api/v1/sampler", samplerH.HandlePutSampler)
 
 		// SSE
-		protected.Get("/sse/spans", sseBus.ServeSSE)
-		protected.Get("/sse/traces", sseBus.ServeSSE)
+		protected.Get("/sse/spans", func(w http.ResponseWriter, r *http.Request) {
+			sseBus.ServeFilteredSSE(w, r, "span")
+		})
+		protected.Get("/sse/traces", func(w http.ResponseWriter, r *http.Request) {
+			sseBus.ServeFilteredSSE(w, r, "trace")
+		})
 		protected.Get("/sse/metrics", metricsBus.ServeSSE)
 		protected.Get("/sse/sampler", samplerBus.ServeSSE)
 	})

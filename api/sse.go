@@ -58,6 +58,12 @@ func (b *SSEBus) Broadcast(event SSEEvent) {
 
 // ServeSSE serves an SSE endpoint. It blocks until client disconnects.
 func (b *SSEBus) ServeSSE(w http.ResponseWriter, r *http.Request) {
+	b.ServeFilteredSSE(w, r)
+}
+
+// ServeFilteredSSE serves an SSE endpoint that only forwards the requested event types.
+// When no event types are provided, it forwards all events.
+func (b *SSEBus) ServeFilteredSSE(w http.ResponseWriter, r *http.Request, eventTypes ...string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", 500)
@@ -71,6 +77,11 @@ func (b *SSEBus) ServeSSE(w http.ResponseWriter, r *http.Request) {
 	ch := b.Subscribe()
 	defer b.Unsubscribe(ch)
 
+	allowed := make(map[string]struct{}, len(eventTypes))
+	for _, t := range eventTypes {
+		allowed[t] = struct{}{}
+	}
+
 	// Send initial ping
 	fmt.Fprintf(w, "data: {\"type\":\"ping\"}\n\n")
 	flusher.Flush()
@@ -80,6 +91,11 @@ func (b *SSEBus) ServeSSE(w http.ResponseWriter, r *http.Request) {
 		case event, ok := <-ch:
 			if !ok {
 				return
+			}
+			if len(allowed) > 0 {
+				if _, ok := allowed[event.Type]; !ok {
+					continue
+				}
 			}
 			data, _ := json.Marshal(event)
 			fmt.Fprintf(w, "data: %s\n\n", data)
