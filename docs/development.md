@@ -22,6 +22,7 @@ go test ./... -run TestName
 ```bash
 cd web
 npm test
+npm run test:e2e
 npx tsc --noEmit
 npm run build
 ```
