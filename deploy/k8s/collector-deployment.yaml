@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: collector
+  namespace: tracing-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: collector
+  template:
+    metadata:
+      labels:
+        app: collector
+    spec:
+      containers:
+        - name: collector
+          image: ghcr.io/your-org/distributed-tracing-system/collector:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 4318
+              name: http
+            - containerPort: 4317
+              name: grpc
+          envFrom:
+            - configMapRef:
+                name: collector-config
+          volumeMounts:
+            - name: collector-data
+              mountPath: /var/lib/tracing
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: collector-data
+          emptyDir: {}
