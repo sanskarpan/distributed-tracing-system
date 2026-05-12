@@ -144,6 +144,17 @@ paths:
                   uptimeSec:  { type: number }
                   goroutines: { type: integer }
                   heapMB:     { type: integer }
+        "503":
+          description: Collector is draining and should stop receiving new traffic
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:     { type: string, example: draining }
+                  uptimeSec:  { type: number }
+                  goroutines: { type: integer }
+                  heapMB:     { type: integer }
 
   /metrics:
     get:
