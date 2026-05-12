@@ -14,18 +14,19 @@ import (
 )
 
 func SetupRoutes(ctx context.Context, r *chi.Mux, pipeline *Pipeline, store storage.TraceStore,
-	metricsStore *metrics.MetricsStore, sseBus *SSEBus, apiKey string) {
+	metricsStore *metrics.MetricsStore, sseBus *SSEBus, apiKey string) *ProbeState {
 
 	// Wire pipeline worker pool shutdown to context
 	pipeline.StartWithContext(ctx)
+	probes := NewProbeState()
 
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Compress(5, "application/json", "text/plain", "text/html"))
 	r.Use(CORS)
 
 	// Public endpoints
-	r.Get("/healthz", HandleHealthz)
-	r.Get("/readyz", HandleReadyz)
+	r.Get("/healthz", probes.HandleHealthz)
+	r.Get("/readyz", probes.HandleReadyz)
 	r.Get("/openapi.yaml", HandleOpenAPI)
 	r.Get("/metrics", NewPrometheusHandler(metricsStore, pipeline).ServeHTTP)
 	r.Get("/api/v1/config", HandleConfig)
@@ -128,6 +129,8 @@ func SetupRoutes(ctx context.Context, r *chi.Mux, pipeline *Pipeline, store stor
 			}
 		}
 	}()
+
+	return probes
 }
 
 // NewPipelineWithDefaults creates a pipeline with sensible defaults.
