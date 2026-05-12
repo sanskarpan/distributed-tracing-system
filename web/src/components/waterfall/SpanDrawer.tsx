@@ -1,4 +1,4 @@
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Badge } from '@/components/ui/badge'
 import type { SpanDetailDTO } from '@/types'
 import { getKindLabel, getStatusLabel, getServiceColor } from '@/lib/colors'
@@ -32,6 +32,9 @@ export function SpanDrawer({ span, open, onClose, onParentClick, allSpans }: Pro
       <SheetContent className="w-[480px] overflow-y-auto">
         <SheetHeader>
           <SheetTitle className="text-sm font-mono">{span.name}</SheetTitle>
+          <SheetDescription>
+            Inspect span metadata, attributes, events, and cross-links for {span.serviceName}.
+          </SheetDescription>
           <div className="flex gap-2 flex-wrap">
             <Badge style={{ backgroundColor: getServiceColor(span.serviceName) }} className="text-white">
               {span.serviceName}

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { GitBranchPlus, Network, Telescope } from 'lucide-react'
 import {
   ReactFlow,
   Background,
@@ -20,8 +21,6 @@ import { getServiceColor } from '@/lib/colors'
 import { PageState } from '@/components/ui/page-state'
 import { getErrorMessage } from '@/lib/errors'
 
-// ─────────────────── Custom Node ───────────────────
-
 type ServiceNodePayload = {
   label: string
   spanCount: number
@@ -32,7 +31,6 @@ type ServiceNodePayload = {
 
 function ServiceNodeComponent({ data, selected }: NodeProps<Node<ServiceNodePayload>>) {
   const radius = Math.max(24, Math.min(50, 20 + Math.log1p(data.spanCount) * 5))
-  // HSL: 120° (green) when errorRate=0, 0° (red) when errorRate=1
   const hue = Math.round((1 - Math.min(data.errorRate, 1)) * 120)
   const fill = `hsl(${hue}, 70%, 45%)`
 
@@ -64,8 +62,6 @@ function ServiceNodeComponent({ data, selected }: NodeProps<Node<ServiceNodePayl
     </div>
   )
 }
-
-// ─────────────────── Custom Edge ───────────────────
 
 function DependencyEdgeComponent({
   id, sourceX, sourceY, targetX, targetY, data,
@@ -106,8 +102,6 @@ function DependencyEdgeComponent({
 const nodeTypes = { serviceNode: ServiceNodeComponent }
 const edgeTypes = { dependencyEdge: DependencyEdgeComponent }
 
-// ─────────────────── Dagre layout ───────────────────
-
 function applyDagreLayout(
   nodes: Node<ServiceNodePayload>[],
   edges: Edge[]
@@ -130,8 +124,6 @@ function applyDagreLayout(
     return { ...node, position: { x, y } }
   })
 }
-
-// ─────────────────── Page ───────────────────
 
 export function ServiceMapPage() {
   const [graph, setGraph] = useState<DependencyGraph | null>(null)
@@ -217,69 +209,141 @@ export function ServiceMapPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-64px)]">
-      <div className="flex-1 border rounded-lg overflow-hidden">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          onNodeClick={handleNodeClick}
-          fitView
-        >
-          <Background />
-          <Controls />
-        </ReactFlow>
-      </div>
+    <div className="space-y-5">
+      <section className="relative overflow-hidden rounded-[32px] border border-border/70 bg-card/92 p-6 shadow-[0_30px_110px_-52px_rgba(15,23,42,0.55)] backdrop-blur sm:p-8">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.14),_transparent_42%)]" />
+        <div className="relative grid gap-5 lg:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.9fr)]">
+          <div className="space-y-3">
+            <div className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+              <Network className="h-3.5 w-3.5" />
+              Dependency topology
+            </div>
+            <h1 className="text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
+              Follow cross-service pressure, saturation, and failure propagation.
+            </h1>
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
+              Node size tracks span volume, color shifts with error rate, and animated edges call out the busiest
+              dependencies so you can reason about topology before drilling into a trace.
+            </p>
+          </div>
 
-      {selectedNode && (
-        <div ref={sidebarRef} className="w-72 border-l p-4 overflow-y-auto bg-background">
-          <div className="flex items-center justify-between mb-3">
-            <h3
-              className="font-semibold text-sm"
-              style={{ color: getServiceColor(selectedNode.name) }}
-            >
-              {selectedNode.name}
-            </h3>
-            <button type="button" aria-label="Close service details" className="text-muted-foreground hover:text-foreground text-xs" onClick={() => setSelectedNode(null)}>
-              ✕
-            </button>
-          </div>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Spans</span>
-              <span className="font-mono">{selectedNode.spanCount.toLocaleString()}</span>
+          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+            <div className="rounded-[24px] border border-border/70 bg-background/70 p-4">
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                <GitBranchPlus className="h-3.5 w-3.5" />
+                Services
+              </div>
+              <div className="mt-3 text-3xl font-semibold text-foreground">{graph.services.length}</div>
+              <div className="mt-1 text-xs text-muted-foreground">Distinct services included in the dependency graph</div>
             </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Error rate</span>
-              <span className={`font-mono ${selectedNode.errorRate > 0.05 ? 'text-red-600' : ''}`}>
-                {(selectedNode.errorRate * 100).toFixed(1)}%
-              </span>
+            <div className="rounded-[24px] border border-border/70 bg-background/70 p-4">
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                <Telescope className="h-3.5 w-3.5" />
+                Edges
+              </div>
+              <div className="mt-3 text-3xl font-semibold text-foreground">{graph.edges.length}</div>
+              <div className="mt-1 text-xs text-muted-foreground">Highlighted edges indicate the busiest call paths</div>
             </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">P99 latency</span>
-              <span className="font-mono">{selectedNode.p99Ms.toFixed(1)}ms</span>
+            <div className="rounded-[24px] border border-border/70 bg-background/70 p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Operator hint</div>
+              <div className="mt-3 text-sm font-medium text-foreground">Click a node to pin service details and edge metrics.</div>
             </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Req/s</span>
-              <span className="font-mono">{selectedNode.reqPerSec.toFixed(2)}</span>
-            </div>
-          </div>
-          <div className="mt-4">
-            <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-2">Edges</h4>
-            {graph.edges
-              .filter((e: ServiceEdge) => e.caller === selectedNode.name || e.callee === selectedNode.name)
-              .map((e: ServiceEdge) => (
-                <div key={`${e.caller}-${e.callee}`} className="text-xs border rounded p-2 mb-1">
-                  <div className="font-mono">{e.caller} → {e.callee}</div>
-                  <div className="text-muted-foreground">{e.count} calls · P99 {e.p99Ms.toFixed(0)}ms</div>
-                </div>
-              ))}
           </div>
         </div>
-      )}
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="overflow-hidden rounded-[28px] border border-border/70 bg-card/88 shadow-[0_24px_90px_-52px_rgba(15,23,42,0.45)] backdrop-blur">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-5 py-4">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">Graph canvas</div>
+              <div className="mt-1 text-sm text-muted-foreground">Drag, pan, and zoom to isolate service clusters and high-volume paths.</div>
+            </div>
+            <span className="rounded-full border border-border/70 bg-background/70 px-3 py-1.5 text-sm text-muted-foreground">
+              {graph.services.length} services / {graph.edges.length} dependencies
+            </span>
+          </div>
+          <div className="h-[calc(100vh-320px)] min-h-[560px]">
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              onNodeClick={handleNodeClick}
+              fitView
+            >
+              <Background />
+              <Controls />
+            </ReactFlow>
+          </div>
+        </div>
+
+        <aside ref={sidebarRef} className="rounded-[28px] border border-border/70 bg-card/88 p-5 shadow-[0_24px_90px_-52px_rgba(15,23,42,0.45)] backdrop-blur">
+          {selectedNode ? (
+            <>
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">Selected service</div>
+                  <h3
+                    className="mt-1 text-xl font-semibold tracking-tight"
+                    style={{ color: getServiceColor(selectedNode.name) }}
+                  >
+                    {selectedNode.name}
+                  </h3>
+                </div>
+                <button type="button" aria-label="Close service details" className="rounded-full border border-border/70 px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground" onClick={() => setSelectedNode(null)}>
+                  Close
+                </button>
+              </div>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between rounded-2xl border border-border/70 bg-background/60 px-3 py-2">
+                  <span className="text-muted-foreground">Spans</span>
+                  <span className="font-mono">{selectedNode.spanCount.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between rounded-2xl border border-border/70 bg-background/60 px-3 py-2">
+                  <span className="text-muted-foreground">Error rate</span>
+                  <span className={`font-mono ${selectedNode.errorRate > 0.05 ? 'text-red-600' : ''}`}>
+                    {(selectedNode.errorRate * 100).toFixed(1)}%
+                  </span>
+                </div>
+                <div className="flex justify-between rounded-2xl border border-border/70 bg-background/60 px-3 py-2">
+                  <span className="text-muted-foreground">P99 latency</span>
+                  <span className="font-mono">{selectedNode.p99Ms.toFixed(1)}ms</span>
+                </div>
+                <div className="flex justify-between rounded-2xl border border-border/70 bg-background/60 px-3 py-2">
+                  <span className="text-muted-foreground">Req/s</span>
+                  <span className="font-mono">{selectedNode.reqPerSec.toFixed(2)}</span>
+                </div>
+              </div>
+
+              <div className="mt-5">
+                <h4 className="mb-2 text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Connected edges</h4>
+                {graph.edges
+                  .filter((e: ServiceEdge) => e.caller === selectedNode.name || e.callee === selectedNode.name)
+                  .map((e: ServiceEdge) => (
+                    <div key={`${e.caller}-${e.callee}`} className="mb-2 rounded-2xl border border-border/70 bg-background/60 p-3 text-xs">
+                      <div className="font-mono text-foreground">{e.caller} → {e.callee}</div>
+                      <div className="mt-1 text-muted-foreground">{e.count} calls · P99 {e.p99Ms.toFixed(0)}ms</div>
+                    </div>
+                  ))}
+              </div>
+            </>
+          ) : (
+            <div className="flex h-full min-h-72 flex-col justify-center text-center">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-border/70 bg-background/70 text-primary">
+                <Network className="h-6 w-6" />
+              </div>
+              <h3 className="mt-4 text-2xl font-semibold tracking-tight text-foreground">Select a service node</h3>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Click any service bubble in the graph to inspect span volume, error rate, p99 latency, and the
+                connected dependencies around that node.
+              </p>
+            </div>
+          )}
+        </aside>
+      </section>
     </div>
   )
 }
