@@ -17,6 +17,18 @@ go test ./... -race
 go test ./... -run TestName
 ```
 
+### Load Testing
+
+```bash
+make loadtest
+```
+
+Or run the k6 script directly with custom environment variables:
+
+```bash
+BASE_URL=http://localhost:4318 BATCH_SIZE=25 k6 run loadtests/k6/ingest-native-spans.js
+```
+
 ### Frontend
 
 ```bash
