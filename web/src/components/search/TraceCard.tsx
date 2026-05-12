@@ -13,9 +13,11 @@ export function TraceCard({ trace, maxDuration, onClick }: Props) {
   const timeAgo = formatTimeAgo(trace.receivedAt)
 
   return (
-    <div
-      className="border rounded-lg p-3 hover:bg-accent cursor-pointer transition-colors"
+    <button
+      type="button"
+      className="w-full rounded-lg border p-3 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       onClick={onClick}
+      aria-label={`Open trace ${trace.traceId} for ${trace.rootOp}`}
     >
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
@@ -50,7 +52,7 @@ export function TraceCard({ trace, maxDuration, onClick }: Props) {
           }}
         />
       </div>
-    </div>
+    </button>
   )
 }
 

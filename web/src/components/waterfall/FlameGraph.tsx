@@ -2,7 +2,7 @@ import * as d3 from 'd3'
 import { useEffect, useRef, useCallback } from 'react'
 import type { TraceDetailDTO, SpanDetailDTO } from '@/types'
 import { getServiceColor } from '@/lib/colors'
-import { buildSpanRows } from './WaterfallChart'
+import { buildSpanRows } from './span-layout'
 
 const ROW_HEIGHT = 22
 const ROW_GAP = 2
@@ -20,7 +20,10 @@ interface Props {
 export function FlameGraph({ trace, onSpanSelect, criticalPathIds, grayedSpanIds, highlightedSpanIds }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const onSpanSelectRef = useRef(onSpanSelect)
-  onSpanSelectRef.current = onSpanSelect
+
+  useEffect(() => {
+    onSpanSelectRef.current = onSpanSelect
+  }, [onSpanSelect])
 
   const draw = useCallback(() => {
     if (!svgRef.current || !trace) return
@@ -168,7 +171,7 @@ export function FlameGraph({ trace, onSpanSelect, criticalPathIds, grayedSpanIds
   }, [draw])
 
   return (
-    <div className="relative w-full overflow-hidden border rounded-lg bg-white">
+    <div className="relative w-full overflow-hidden rounded-lg border bg-background">
       <svg ref={svgRef} className="w-full flame-svg" style={{ minHeight: 120 }} />
     </div>
   )

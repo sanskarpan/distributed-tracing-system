@@ -51,6 +51,7 @@ export function useSearch(initialFilters: SearchFilters) {
   const [filters, setFilters] = useState<SearchFilters>(initialFilters)
   const [results, setResults] = useState<TraceListResponse | null>(null)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const requestIdRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
@@ -68,6 +69,7 @@ export function useSearch(initialFilters: SearchFilters) {
       const params = buildTraceQueryParams(filters)
 
       setLoading(true)
+      setError(null)
       api
         .getTraces(params, { signal: controller.signal })
         .then((r) => {
@@ -86,7 +88,7 @@ export function useSearch(initialFilters: SearchFilters) {
           if (err instanceof DOMException && err.name === 'AbortError') {
             return
           }
-          console.error(err)
+          setError(err instanceof Error ? err.message : 'Failed to load traces.')
         })
         .finally(() => {
           if (requestId === requestIdRef.current) {
@@ -103,5 +105,5 @@ export function useSearch(initialFilters: SearchFilters) {
     }
   }, [filters])
 
-  return { results, loading, filters, setFilters }
+  return { results, loading, error, filters, setFilters }
 }

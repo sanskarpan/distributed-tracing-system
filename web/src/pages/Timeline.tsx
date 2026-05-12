@@ -5,6 +5,8 @@ import { api } from '@/api/client'
 import { useSSE } from '@/hooks/useSSE'
 import { getServiceColor } from '@/lib/colors'
 import type { TraceSummaryDTO } from '@/types'
+import { PageState } from '@/components/ui/page-state'
+import { getErrorMessage } from '@/lib/errors'
 
 const LANE_HEIGHT = 28
 const LANE_GAP = 6
@@ -16,14 +18,21 @@ export function TimelinePage() {
   const navigate = useNavigate()
   const svgRef = useRef<SVGSVGElement>(null)
   const [traces, setTraces] = useState<TraceSummaryDTO[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   const loadTraces = useCallback(() => {
+    setError(null)
     api.getTraces({ limit: 200, sortBy: 'receivedAt', sortDesc: 'false' })
       .then(r => setTraces(r.traces))
-      .catch(console.error)
+      .catch((err: unknown) => setError(getErrorMessage(err, 'Failed to load timeline traces.')))
+      .finally(() => setLoading(false))
   }, [])
 
-  useEffect(() => { loadTraces() }, [loadTraces])
+  useEffect(() => {
+    const timer = window.setTimeout(loadTraces, 0)
+    return () => window.clearTimeout(timer)
+  }, [loadTraces])
 
   useSSE('/sse/traces', (event: unknown) => {
     const e = event as { type?: string }
@@ -207,10 +216,14 @@ export function TimelinePage() {
         <h1 className="text-xl font-bold">Timeline</h1>
         <span className="text-sm text-muted-foreground">{traces.length} traces — scroll/pinch to zoom</span>
       </div>
-      {traces.length === 0 ? (
-        <p className="text-center py-12 text-muted-foreground">No traces found. Ingest spans to see them here.</p>
+      {loading && traces.length === 0 ? (
+        <PageState title="Loading timeline" description="Fetching recent traces for the timeline view." />
+      ) : error && traces.length === 0 ? (
+        <PageState title="Unable to load timeline" description={error} actionLabel="Retry" onAction={loadTraces} />
+      ) : traces.length === 0 ? (
+        <PageState title="No traces yet" description="Ingest spans or run demo traffic to populate the timeline." />
       ) : (
-        <div className="border rounded-lg overflow-hidden bg-white">
+        <div className="overflow-hidden rounded-lg border bg-background">
           <svg ref={svgRef} className="w-full" style={{ minHeight: 200 }} />
         </div>
       )}

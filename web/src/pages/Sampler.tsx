@@ -21,6 +21,8 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts'
+import { PageState } from '@/components/ui/page-state'
+import { getErrorMessage } from '@/lib/errors'
 
 // ─────────────────── Throughput history ring buffer ───────────────────
 
@@ -57,6 +59,8 @@ let _policyId = 0
 export function SamplerPage() {
   const [config, setConfig] = useState<SamplerConfig | null>(null)
   const [selectedType, setSelectedType] = useState('always')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   // Type-specific config state
   const [probRate, setProbRate] = useState(0.1)
@@ -77,6 +81,7 @@ export function SamplerPage() {
   const prevDropped = useRef(0)
 
   const fetchConfig = useCallback(() => {
+    setError(null)
     api.getSampler().then(c => {
       setConfig(c)
       setSelectedType(c.type)
@@ -92,13 +97,18 @@ export function SamplerPage() {
         const next = [...prev, { t: now, sampled: sampledDelta, dropped: droppedDelta, rate: c.stats.samplingRate * 100 }]
         return next.length > MAX_HISTORY ? next.slice(-MAX_HISTORY) : next
       })
-    }).catch(console.error)
+    }).catch((err: unknown) => {
+      setError(getErrorMessage(err, 'Failed to load sampler configuration.'))
+    }).finally(() => setLoading(false))
   }, [])
 
   useEffect(() => {
-    fetchConfig()
+    const timer = window.setTimeout(fetchConfig, 0)
     const iv = setInterval(fetchConfig, 3000)
-    return () => clearInterval(iv)
+    return () => {
+      window.clearTimeout(timer)
+      clearInterval(iv)
+    }
   }, [fetchConfig])
 
   // Live SSE updates
@@ -140,14 +150,32 @@ export function SamplerPage() {
 
   const handleConfirm = async () => {
     if (!pendingBody) return
-    await api.putSampler(pendingBody)
-    setPendingBody(null)
-    fetchConfig()
+    try {
+      await api.putSampler(pendingBody)
+      setPendingBody(null)
+      fetchConfig()
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to apply sampler configuration.'))
+    }
+  }
+
+  if (loading && !config) {
+    return <PageState title="Loading sampler" description="Fetching current sampler configuration and throughput history." />
+  }
+
+  if (error && !config) {
+    return <PageState title="Unable to load sampler" description={error} actionLabel="Retry" onAction={fetchConfig} />
   }
 
   return (
     <div className="p-4 max-w-3xl mx-auto space-y-4">
       <h1 className="text-xl font-bold">Sampler Configuration</h1>
+
+      {error && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {error}
+        </div>
+      )}
 
       {/* Stats card */}
       {config && (
@@ -201,7 +229,7 @@ export function SamplerPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <Select value={selectedType} onValueChange={v => { setSelectedType(v); setPendingBody(null) }}>
-            <SelectTrigger>
+            <SelectTrigger aria-label="Select sampler strategy">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -283,7 +311,7 @@ export function SamplerPage() {
                       value={rule.priority}
                       onChange={e => setRules(prev => prev.map((r, j) => j === i ? { ...r, priority: Number(e.target.value) } : r))}
                     />
-                    <button className="text-red-600 hover:text-red-800" onClick={() => setRules(prev => prev.filter((_, j) => j !== i))}>✕</button>
+                    <button type="button" className="text-red-600 hover:text-red-800" aria-label="Remove rule" onClick={() => setRules(prev => prev.filter((_, j) => j !== i))}>✕</button>
                   </div>
                   <div className="flex gap-2 items-center">
                     <select
@@ -311,7 +339,9 @@ export function SamplerPage() {
                 </div>
               ))}
               <button
+                type="button"
                 className="text-xs text-blue-600 hover:underline"
+                aria-label="Add sampler rule"
                 onClick={() => setRules(prev => [...prev, { id: ++_ruleId, operationGlob: '*', service: '', priority: 10, samplerType: 'always', samplerRate: 1 }])}
               >
                 + Add rule
@@ -365,11 +395,13 @@ export function SamplerPage() {
                         onChange={e => setTailPolicies(prev => prev.map((q, j) => j === i ? { ...q, rate: Number(e.target.value) } : q))}
                       />
                     )}
-                    <button className="text-red-600 ml-auto" onClick={() => setTailPolicies(prev => prev.filter((_, j) => j !== i))}>✕</button>
+                    <button type="button" className="text-red-600 ml-auto" aria-label="Remove tail policy" onClick={() => setTailPolicies(prev => prev.filter((_, j) => j !== i))}>✕</button>
                   </div>
                 ))}
                 <button
+                  type="button"
                   className="text-xs text-blue-600 hover:underline"
+                  aria-label="Add tail policy"
                   onClick={() => setTailPolicies(prev => [...prev, { id: ++_policyId, type: 'error', thresholdMs: 500, rate: 0.1 }])}
                 >
                   + Add policy

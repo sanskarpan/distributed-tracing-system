@@ -35,7 +35,7 @@ export function FilterBar({ services, operations, filters, onChange }: Props) {
           onChange({ ...filters, service: v === 'all' ? undefined : v, operation: undefined })
         }
       >
-        <SelectTrigger className="w-40">
+        <SelectTrigger className="w-40" aria-label="Filter by service">
           <SelectValue placeholder="All services" />
         </SelectTrigger>
         <SelectContent>
@@ -54,7 +54,7 @@ export function FilterBar({ services, operations, filters, onChange }: Props) {
         }
         disabled={!filters.service}
       >
-        <SelectTrigger className="w-48">
+        <SelectTrigger className="w-48" aria-label="Filter by operation">
           <SelectValue placeholder="All operations" />
         </SelectTrigger>
         <SelectContent>
@@ -72,7 +72,7 @@ export function FilterBar({ services, operations, filters, onChange }: Props) {
           onChange({ ...filters, timeRangeMinutes: Number(v) || undefined })
         }
       >
-        <SelectTrigger className="w-36">
+        <SelectTrigger className="w-36" aria-label="Filter by time range">
           <SelectValue placeholder="All time" />
         </SelectTrigger>
         <SelectContent>
@@ -86,6 +86,7 @@ export function FilterBar({ services, operations, filters, onChange }: Props) {
       <input
         type="text"
         placeholder="attr: key=value"
+        aria-label="Filter by span attribute"
         value={filters.attr ?? ''}
         onChange={(e) => onChange({ ...filters, attr: e.target.value || undefined })}
         className="h-9 rounded-md border border-input bg-background px-3 text-sm w-44 placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -98,6 +99,7 @@ export function FilterBar({ services, operations, filters, onChange }: Props) {
           onCheckedChange={(checked) =>
             onChange({ ...filters, status: checked ? 'error' : 'all' })
           }
+          aria-label="Show only error traces"
         />
         <span className="text-sm">Errors only</span>
       </div>

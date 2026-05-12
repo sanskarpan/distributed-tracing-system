@@ -2,6 +2,7 @@ import { Suspense, lazy } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { Nav } from '@/components/Nav'
 import { SearchPage } from '@/pages/Search'
+import { NotFoundPage } from '@/pages/NotFound'
 
 const TraceDetailPage = lazy(async () => ({ default: (await import('@/pages/TraceDetail')).TraceDetailPage }))
 const ServiceMapPage = lazy(async () => ({ default: (await import('@/pages/ServiceMap')).ServiceMapPage }))
@@ -33,6 +34,7 @@ export default function App() {
               <Route path="/sampler" element={<SamplerPage />} />
               <Route path="/compare" element={<ComparePage />} />
               <Route path="/timeline" element={<TimelinePage />} />
+              <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </Suspense>
         </main>

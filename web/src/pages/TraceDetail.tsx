@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { WaterfallChart } from '@/components/waterfall/WaterfallChart'
 import { FlameGraph } from '@/components/waterfall/FlameGraph'
@@ -8,6 +8,8 @@ import type { TraceDetailDTO, SpanDetailDTO } from '@/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
+import { PageState } from '@/components/ui/page-state'
+import { getErrorMessage } from '@/lib/errors'
 
 export function TraceDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -17,6 +19,8 @@ export function TraceDetailPage() {
   const [copied, setCopied] = useState(false)
   const [spanFilter, setSpanFilter] = useState('')
   const [viewMode, setViewMode] = useState<'waterfall' | 'flame'>('waterfall')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   const spanIndexRef = useRef(0)
 
@@ -91,15 +95,51 @@ export function TraceDetailPage() {
     })
   }, [])
 
-  useEffect(() => {
+  const reloadTrace = useCallback(async () => {
     if (!id) return
-    api.getTrace(id).then(setTrace).catch(console.error)
+
+    setLoading(true)
+    setError(null)
+
+    try {
+      const nextTrace = await api.getTrace(id)
+      setTrace(nextTrace)
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Failed to load trace detail.'))
+    } finally {
+      setLoading(false)
+    }
   }, [id])
 
+  useEffect(() => {
+    if (!id) return
+    const timer = window.setTimeout(() => {
+      void reloadTrace()
+    }, 0)
+
+    return () => window.clearTimeout(timer)
+  }, [id, reloadTrace])
+
+  const rootCauseSpan = trace?.errorCount && trace.errorCount > 0
+    ? trace.spans
+        .filter((span) => span.status.code === 2)
+        .sort((left, right) => Number(left.startTimeUnixNano) - Number(right.startTimeUnixNano))[0] ?? null
+    : null
+
+  if (!id) {
+    return <PageState title="Trace ID missing" description="Open this page with a valid trace identifier." />
+  }
+
+  if (loading && !trace) {
+    return <PageState title="Loading trace" description="Fetching spans, analysis, and critical path data." />
+  }
+
+  if (error) {
+    return <PageState title="Unable to load trace" description={error} actionLabel="Retry" onAction={() => void reloadTrace()} />
+  }
+
   if (!trace) {
-    return (
-      <div className="p-8 text-center text-muted-foreground">Loading trace&hellip;</div>
-    )
+    return <PageState title="Trace unavailable" description="The requested trace could not be found." />
   }
 
   const criticalPathIds = new Set(trace.criticalPath)
@@ -126,16 +166,6 @@ export function TraceDetailPage() {
     return { grayedSpanIds: grayed, highlightedSpanIds: matched }
   })()
 
-  // Root cause: the earliest span with an error status (code 2 = StatusError in OTLP)
-  const rootCauseSpan = useMemo(() =>
-    trace.errorCount > 0
-      ? trace.spans
-          .filter(s => s.status.code === 2)
-          .sort((a, b) => Number(a.startTimeUnixNano) - Number(b.startTimeUnixNano))[0] ?? null
-      : null,
-    [trace]
-  )
-
   return (
     <div className="p-4">
       <div className="mb-4 flex items-center gap-3 flex-wrap">
@@ -147,6 +177,7 @@ export function TraceDetailPage() {
         )}
         {rootCauseSpan && (
           <button
+            type="button"
             className="text-xs px-2 py-1 rounded bg-red-100 text-red-700 border border-red-300 hover:bg-red-200 transition-colors"
             onClick={() => { setSelectedSpan(rootCauseSpan); setDrawerOpen(true) }}
           >
@@ -190,12 +221,14 @@ export function TraceDetailPage() {
         )}
         <div className="ml-auto flex rounded-md border overflow-hidden text-xs">
           <button
+            type="button"
             className={`px-3 py-1 ${viewMode === 'waterfall' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}
             onClick={() => setViewMode('waterfall')}
           >
             Waterfall
           </button>
           <button
+            type="button"
             className={`px-3 py-1 ${viewMode === 'flame' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}
             onClick={() => setViewMode('flame')}
           >

@@ -59,6 +59,7 @@ export function SpanDrawer({ span, open, onClose, onParentClick, allSpans }: Pro
           {/* Parent link */}
           {parentSpan && onParentClick && (
             <button
+              type="button"
               className="text-xs text-blue-600 hover:underline text-left"
               onClick={() => onParentClick(parentSpan.spanId)}
             >
