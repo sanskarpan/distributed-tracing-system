@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hasActiveSearchFilters, mergeUniqueTraces } from './Search'
+import { hasActiveSearchFilters, mergeUniqueTraces } from './search-helpers'
 import type { TraceSummaryDTO } from '@/types'
 
 function makeTrace(traceId: string): TraceSummaryDTO {

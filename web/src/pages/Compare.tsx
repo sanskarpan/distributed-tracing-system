@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { WaterfallChart } from '@/components/waterfall/WaterfallChart'
+import { PageState } from '@/components/ui/page-state'
 import { api } from '@/api/client'
+import { getErrorMessage } from '@/lib/errors'
 import type { TraceDetailDTO, TraceComparisonDTO } from '@/types'
 
 export function ComparePage() {
@@ -11,22 +13,60 @@ export function ComparePage() {
   const [base, setBase] = useState<TraceDetailDTO | null>(null)
   const [compare, setCompare] = useState<TraceDetailDTO | null>(null)
   const [diff, setDiff] = useState<TraceComparisonDTO | null>(null)
+  const [loading, setLoading] = useState(Boolean(baseId && compareId))
+  const [error, setError] = useState<string | null>(null)
+
+  const loadComparison = useCallback(async (nextBaseId: string, nextCompareId: string) => {
+    setLoading(true)
+    setError(null)
+    setBase(null)
+    setCompare(null)
+    setDiff(null)
+
+    try {
+      const [nextBase, nextCompare, nextDiff] = await Promise.all([
+        api.getTrace(nextBaseId),
+        api.getTrace(nextCompareId),
+        api.compareTraces(nextBaseId, nextCompareId),
+      ])
+      setBase(nextBase)
+      setCompare(nextCompare)
+      setDiff(nextDiff)
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Failed to load trace comparison.'))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
     if (!baseId || !compareId) return
-    Promise.all([
-      api.getTrace(baseId).then(setBase),
-      api.getTrace(compareId).then(setCompare),
-      api.compareTraces(baseId, compareId).then(setDiff),
-    ]).catch(console.error)
-  }, [baseId, compareId])
+    const timer = window.setTimeout(() => {
+      void loadComparison(baseId, compareId)
+    }, 0)
 
-  if (!base || !compare) {
+    return () => window.clearTimeout(timer)
+  }, [baseId, compareId, loadComparison])
+
+  if (!baseId || !compareId) {
     return (
-      <div className="p-8 text-center text-muted-foreground">
-        Select two traces to compare. Use ?base=ID&amp;compare=ID in the URL.
-      </div>
+      <PageState
+        title="Select two traces to compare"
+        description="Open this page with both ?base=TRACE_ID and ?compare=TRACE_ID in the URL."
+      />
     )
+  }
+
+  if (loading && (!base || !compare)) {
+    return <PageState title="Loading trace comparison" description="Fetching both traces and their diff." />
+  }
+
+  if (error) {
+    return <PageState title="Unable to compare traces" description={error} actionLabel="Retry" onAction={() => void loadComparison(baseId, compareId)} />
+  }
+
+  if (!base || !compare || !diff) {
+    return <PageState title="Comparison unavailable" description="The requested traces could not be resolved." />
   }
 
   const maxDuration = Math.max(base.durationMs, compare.durationMs)
@@ -68,7 +108,7 @@ export function ComparePage() {
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <div>
           <div className="text-sm font-medium mb-2 text-muted-foreground">
             Base &middot; {base.durationMs.toFixed(1)}ms

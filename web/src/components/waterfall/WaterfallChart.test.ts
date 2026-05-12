@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildSpanRows } from './WaterfallChart'
+import { buildSpanRows } from './span-layout'
 import type { TraceDetailDTO, SpanDetailDTO } from '@/types'
 
 function makeSpan(overrides: Partial<SpanDetailDTO> & { spanId: string }): SpanDetailDTO {

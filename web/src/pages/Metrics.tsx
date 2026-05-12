@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import {
   LineChart,
   Line,
@@ -24,6 +24,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { PageState } from '@/components/ui/page-state'
+import { getErrorMessage } from '@/lib/errors'
 
 type SortKey = 'operation' | 'rate' | 'errorRate' | 'p50Ms' | 'p95Ms' | 'p99Ms'
 
@@ -35,39 +37,44 @@ export function MetricsPage() {
   const [anomalies, setAnomalies] = useState<AnomalyResult[]>([])
   const [slos, setSlos] = useState<SLOResult[]>([])
   const [heatmapData, setHeatmapData] = useState<LatencyHeatmapData>({ bounds: [], buckets: [] })
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  const services = [...new Set(metrics.map(m => m.service))]
+  const services = useMemo(() => [...new Set(metrics.map((metric) => metric.service))], [metrics])
+  const effectiveSelectedService = selectedService || services[0] || ''
 
   const fetchMetrics = useCallback(() => {
+    setError(null)
     Promise.all([
       api.getMetrics(),
       api.getAnomalies(),
       api.getSLOs(),
-      api.getHeatmap(selectedService || undefined),
+      api.getHeatmap(effectiveSelectedService || undefined),
     ]).then(([metricsRes, anomaliesRes, slosRes, heatmapRes]) => {
       setMetrics(metricsRes.metrics)
       setAnomalies(anomaliesRes.anomalies?.filter(a => a.isOutlier) ?? [])
       setSlos(slosRes.slos ?? [])
       setHeatmapData(heatmapRes.latency)
-    }).catch(console.error)
-  }, [selectedService])
+    })
+      .catch((err: unknown) => setError(getErrorMessage(err, 'Failed to load metrics.')))
+      .finally(() => setLoading(false))
+  }, [effectiveSelectedService])
 
   useEffect(() => {
-    fetchMetrics()
+    const timer = window.setTimeout(() => {
+      fetchMetrics()
+    }, 0)
     const iv = setInterval(fetchMetrics, 5000)
-    return () => clearInterval(iv)
+    return () => {
+      window.clearTimeout(timer)
+      clearInterval(iv)
+    }
   }, [fetchMetrics])
 
   // Live update on any SSE event
   useSSE('/sse/metrics', fetchMetrics)
 
-  useEffect(() => {
-    if (!selectedService && services.length > 0) {
-      setSelectedService(services[0])
-    }
-  }, [services, selectedService])
-
-  const svcMetrics = metrics.filter(m => m.service === selectedService)
+  const svcMetrics = metrics.filter(m => m.service === effectiveSelectedService)
 
   const sorted = [...svcMetrics].sort((a, b) => {
     const va = a[sortKey] as number | string
@@ -98,12 +105,20 @@ export function MetricsPage() {
   const sortIndicator = (key: SortKey) =>
     sortKey === key ? (sortAsc ? ' ↑' : ' ↓') : ''
 
+  if (loading && metrics.length === 0 && !error) {
+    return <PageState title="Loading metrics" description="Fetching RED metrics, anomalies, SLOs, and latency heatmaps." />
+  }
+
+  if (error && metrics.length === 0) {
+    return <PageState title="Unable to load metrics" description={error} actionLabel="Retry" onAction={fetchMetrics} />
+  }
+
   return (
     <div className="p-4 max-w-5xl mx-auto space-y-6">
       <div className="flex items-center gap-3">
         <h1 className="text-xl font-bold">Metrics</h1>
-        <Select value={selectedService} onValueChange={setSelectedService}>
-          <SelectTrigger className="w-48">
+        <Select value={effectiveSelectedService} onValueChange={setSelectedService}>
+          <SelectTrigger className="w-48" aria-label="Select service metrics">
             <SelectValue placeholder="Select service" />
           </SelectTrigger>
           <SelectContent>
@@ -113,6 +128,12 @@ export function MetricsPage() {
           </SelectContent>
         </Select>
       </div>
+
+      {error && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {error}
+        </div>
+      )}
 
       {slos.length > 0 && (
         <div className="border rounded-lg p-4">
@@ -247,16 +268,17 @@ export function MetricsPage() {
               <thead className="bg-muted">
                 <tr>
                   <th
-                    className={`text-left p-2 cursor-pointer select-none hover:text-foreground ${sortKey === 'operation' ? 'text-foreground font-bold' : 'text-muted-foreground'}`}
-                    onClick={() => handleSort('operation')}
+                    className="p-2 text-left"
                   >
-                    Operation{sortIndicator('operation')}
+                    <button type="button" className={`select-none hover:text-foreground ${sortKey === 'operation' ? 'text-foreground font-bold' : 'text-muted-foreground'}`} onClick={() => handleSort('operation')}>
+                      Operation{sortIndicator('operation')}
+                    </button>
                   </th>
-                  <th className={thClass('rate')} onClick={() => handleSort('rate')}>Rate{sortIndicator('rate')}</th>
-                  <th className={thClass('errorRate')} onClick={() => handleSort('errorRate')}>Error%{sortIndicator('errorRate')}</th>
-                  <th className={thClass('p50Ms')} onClick={() => handleSort('p50Ms')}>P50{sortIndicator('p50Ms')}</th>
-                  <th className={thClass('p95Ms')} onClick={() => handleSort('p95Ms')}>P95{sortIndicator('p95Ms')}</th>
-                  <th className={thClass('p99Ms')} onClick={() => handleSort('p99Ms')}>P99{sortIndicator('p99Ms')}</th>
+                  <th className="p-2 text-right"><button type="button" className={thClass('rate')} onClick={() => handleSort('rate')}>Rate{sortIndicator('rate')}</button></th>
+                  <th className="p-2 text-right"><button type="button" className={thClass('errorRate')} onClick={() => handleSort('errorRate')}>Error%{sortIndicator('errorRate')}</button></th>
+                  <th className="p-2 text-right"><button type="button" className={thClass('p50Ms')} onClick={() => handleSort('p50Ms')}>P50{sortIndicator('p50Ms')}</button></th>
+                  <th className="p-2 text-right"><button type="button" className={thClass('p95Ms')} onClick={() => handleSort('p95Ms')}>P95{sortIndicator('p95Ms')}</button></th>
+                  <th className="p-2 text-right"><button type="button" className={thClass('p99Ms')} onClick={() => handleSort('p99Ms')}>P99{sortIndicator('p99Ms')}</button></th>
                 </tr>
               </thead>
               <tbody>

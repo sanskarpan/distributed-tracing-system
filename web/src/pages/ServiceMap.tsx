@@ -17,6 +17,8 @@ import '@xyflow/react/dist/style.css'
 import { api } from '@/api/client'
 import type { DependencyGraph, ServiceNode as ServiceNodeData, ServiceEdge } from '@/types'
 import { getServiceColor } from '@/lib/colors'
+import { PageState } from '@/components/ui/page-state'
+import { getErrorMessage } from '@/lib/errors'
 
 // ─────────────────── Custom Node ───────────────────
 
@@ -137,9 +139,12 @@ export function ServiceMapPage() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [selectedNode, setSelectedNode] = useState<ServiceNodeData | null>(null)
   const sidebarRef = useRef<HTMLDivElement>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   const loadGraph = useCallback(async () => {
     try {
+      setError(null)
       const g = await api.getDependencies()
       setGraph(g)
 
@@ -175,21 +180,34 @@ export function ServiceMapPage() {
       setNodes(laid)
       setEdges(rawEdges)
     } catch (err) {
-      console.error(err)
+      setError(getErrorMessage(err, 'Failed to load service dependency graph.'))
+    } finally {
+      setLoading(false)
     }
   }, [setNodes, setEdges])
 
   useEffect(() => {
-    void loadGraph()
+    const timer = window.setTimeout(() => {
+      void loadGraph()
+    }, 0)
     const interval = setInterval(() => { void loadGraph() }, 30000)
-    return () => clearInterval(interval)
+    return () => {
+      window.clearTimeout(timer)
+      clearInterval(interval)
+    }
   }, [loadGraph])
+
+  if (loading && !graph) {
+    return <PageState title="Loading service map" description="Fetching dependency graph and laying out services." />
+  }
+
+  if (error && !graph) {
+    return <PageState title="Unable to load service map" description={error} actionLabel="Retry" onAction={() => { void loadGraph() }} />
+  }
 
   if (!graph || graph.services.length === 0) {
     return (
-      <div className="p-8 text-center text-muted-foreground">
-        No service dependencies yet. Waiting for traces&hellip;
-      </div>
+      <PageState title="No dependencies yet" description="Ingest traces with cross-service calls to populate the service map." />
     )
   }
 
@@ -225,7 +243,7 @@ export function ServiceMapPage() {
             >
               {selectedNode.name}
             </h3>
-            <button className="text-muted-foreground hover:text-foreground text-xs" onClick={() => setSelectedNode(null)}>
+            <button type="button" aria-label="Close service details" className="text-muted-foreground hover:text-foreground text-xs" onClick={() => setSelectedNode(null)}>
               ✕
             </button>
           </div>

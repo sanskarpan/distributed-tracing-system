@@ -17,6 +17,17 @@ open http://localhost:5173
 
 That's it. Within ~10 seconds you'll see traces appearing in the Search page.
 
+## Documentation
+
+Detailed project documentation now lives in [`docs/`](./docs/README.md):
+
+- [Architecture](./docs/architecture.md)
+- [API Guide](./docs/api.md)
+- [Frontend Guide](./docs/frontend.md)
+- [Operations Guide](./docs/operations.md)
+- [Development Guide](./docs/development.md)
+- [Frontend Audit](./docs/frontend-audit.md)
+
 ## Architecture
 
 ```

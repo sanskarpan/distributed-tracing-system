@@ -2,6 +2,7 @@ import * as d3 from 'd3'
 import { useEffect, useRef, useCallback } from 'react'
 import type { TraceDetailDTO, SpanDetailDTO } from '@/types'
 import { getServiceColor } from '@/lib/colors'
+import { buildSpanRows, type SpanRow } from './span-layout'
 
 const LABEL_WIDTH = 220
 const ROW_HEIGHT = 24
@@ -9,18 +10,6 @@ const ROW_GAP = 4
 const ROW_STRIDE = ROW_HEIGHT + ROW_GAP
 const PADDING_TOP = 32
 const MINIMAP_H = 80
-
-interface SpanRow {
-  spanId: string
-  name: string
-  serviceName: string
-  startMs: number
-  durationMs: number
-  depth: number
-  hasError: boolean
-  kind: number
-  span: SpanDetailDTO
-}
 
 interface Props {
   trace: TraceDetailDTO
@@ -31,60 +20,13 @@ interface Props {
   durationDeltas?: Map<string, number>
 }
 
-export function buildSpanRows(trace: TraceDetailDTO): SpanRow[] {
-  const rows: SpanRow[] = []
-  const traceStart = Math.min(...trace.spans.map(s => s.startTimeUnixNano)) / 1e6
-
-  function visit(span: SpanDetailDTO, depth: number) {
-    rows.push({
-      spanId: span.spanId,
-      name: span.name,
-      serviceName: span.serviceName,
-      startMs: span.startTimeUnixNano / 1e6 - traceStart,
-      durationMs: span.durationMs,
-      depth,
-      hasError: span.status.code === 2,
-      kind: span.kind,
-      span,
-    })
-    const children = trace.spans
-      .filter(s => s.parentSpanId === span.spanId)
-      .sort((a, b) => a.startTimeUnixNano - b.startTimeUnixNano)
-    for (const child of children) {
-      visit(child, depth + 1)
-    }
-  }
-
-  const root = trace.spans.find(
-    s => !s.parentSpanId || s.parentSpanId === '0000000000000000'
-  )
-  if (root) visit(root, 0)
-
-  const visited = new Set(rows.map(r => r.spanId))
-  for (const s of trace.spans) {
-    if (!visited.has(s.spanId)) {
-      rows.push({
-        spanId: s.spanId,
-        name: s.name,
-        serviceName: s.serviceName,
-        startMs: s.startTimeUnixNano / 1e6 - traceStart,
-        durationMs: s.durationMs,
-        depth: 0,
-        hasError: s.status.code === 2,
-        kind: s.kind,
-        span: s,
-      })
-    }
-  }
-
-  return rows
-}
-
 export function WaterfallChart({ trace, onSpanSelect, criticalPathIds, grayedSpanIds, highlightedSpanIds, durationDeltas }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
-
   const onSpanSelectRef = useRef(onSpanSelect)
-  onSpanSelectRef.current = onSpanSelect
+
+  useEffect(() => {
+    onSpanSelectRef.current = onSpanSelect
+  }, [onSpanSelect])
 
   const draw = useCallback(() => {
     if (!svgRef.current || !trace) return
@@ -276,7 +218,7 @@ export function WaterfallChart({ trace, onSpanSelect, criticalPathIds, grayedSpa
   }, [draw])
 
   return (
-    <div className="relative w-full overflow-hidden border rounded-lg bg-white">
+    <div className="relative w-full overflow-hidden rounded-lg border bg-background">
       <svg ref={svgRef} className="w-full waterfall-svg" style={{ minHeight: 200 }} />
     </div>
   )
