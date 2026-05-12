@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -81,13 +82,13 @@ func main() {
 	}()
 
 	r := chi.NewRouter()
-	api.SetupRoutes(ctx, r, pipeline, store, metricsStore, sseBus, apiKey)
+	probes := api.SetupRoutes(ctx, r, pipeline, store, metricsStore, sseBus, apiKey)
 
 	addr := ":4318"
 	if a := os.Getenv("LISTEN_ADDR"); a != "" {
 		addr = a
 	}
-	srv := &http.Server{Addr: addr, Handler: r}
+	srv := newHTTPServer(addr, r)
 
 	certFile := os.Getenv("TLS_CERT_FILE")
 	keyFile := os.Getenv("TLS_KEY_FILE")
@@ -108,6 +109,7 @@ func main() {
 
 	<-ctx.Done()
 	fmt.Println("shutting down collector")
+	probes.MarkDraining()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -119,4 +121,42 @@ func main() {
 	if err := pipeline.Shutdown(shutdownCtx); err != nil {
 		log.Printf("pipeline shutdown: %v", err)
 	}
+}
+
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: envDuration("HTTP_READ_HEADER_TIMEOUT", 5*time.Second),
+		ReadTimeout:       envDuration("HTTP_READ_TIMEOUT", 15*time.Second),
+		WriteTimeout:      envDuration("HTTP_WRITE_TIMEOUT", 30*time.Second),
+		IdleTimeout:       envDuration("HTTP_IDLE_TIMEOUT", 60*time.Second),
+		MaxHeaderBytes:    envInt("HTTP_MAX_HEADER_BYTES", 1<<20),
+	}
+}
+
+func envDuration(key string, fallback time.Duration) time.Duration {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil || value <= 0 {
+		log.Printf("invalid %s=%q, using default %s", key, raw, fallback)
+		return fallback
+	}
+	return value
+}
+
+func envInt(key string, fallback int) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		log.Printf("invalid %s=%q, using default %d", key, raw, fallback)
+		return fallback
+	}
+	return value
 }

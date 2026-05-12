@@ -1,13 +1,21 @@
 import { expect, test } from '@playwright/test'
 import {
+  anomaliesResponse,
   dependencyGraphResponse,
+  heatmapResponse,
   installMockEventSource,
+  metricsResponse,
+  samplerConfigResponse,
+  slosResponse,
+  traceComparisonResponse,
   traceDetailResponse,
+  traceDetailCompareResponse,
   tracesResponse,
 } from './support/mock-app'
 
 test.beforeEach(async ({ page }) => {
   await installMockEventSource(page)
+  let samplerState = structuredClone(samplerConfigResponse)
 
   await page.route('**/api/v1/traces?**', async (route) => {
     await route.fulfill({ json: tracesResponse })
@@ -15,6 +23,14 @@ test.beforeEach(async ({ page }) => {
 
   await page.route('**/api/v1/traces/trace-checkout', async (route) => {
     await route.fulfill({ json: traceDetailResponse })
+  })
+
+  await page.route('**/api/v1/traces/trace-checkout-fast', async (route) => {
+    await route.fulfill({ json: traceDetailCompareResponse })
+  })
+
+  await page.route('**/api/v1/traces/compare?**', async (route) => {
+    await route.fulfill({ json: traceComparisonResponse })
   })
 
   await page.route('**/api/v1/config', async (route) => {
@@ -32,6 +48,47 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/v1/operations?**', async (route) => {
     await route.fulfill({ json: { operations: ['POST /checkout', 'GET /catalog'] } })
   })
+
+  await page.route('**/api/v1/metrics/red', async (route) => {
+    await route.fulfill({ json: metricsResponse })
+  })
+
+  await page.route('**/api/v1/metrics/anomalies*', async (route) => {
+    await route.fulfill({ json: anomaliesResponse })
+  })
+
+  await page.route('**/api/v1/metrics/slo*', async (route) => {
+    await route.fulfill({ json: slosResponse })
+  })
+
+  await page.route('**/api/v1/metrics/heatmap*', async (route) => {
+    await route.fulfill({ json: heatmapResponse })
+  })
+
+  await page.route('**/api/v1/sampler', async (route) => {
+    if (route.request().method() === 'PUT') {
+      const body = route.request().postDataJSON() as Record<string, unknown>
+      samplerState = {
+        ...samplerState,
+        type: String(body.type),
+        config: body,
+      }
+      await route.fulfill({ json: { ok: true, type: body.type } })
+      return
+    }
+
+    await route.fulfill({ json: samplerState })
+  })
+})
+
+test('search page opens a trace from the result stream', async ({ page }) => {
+  await page.goto('/')
+
+  await expect(page.getByRole('heading', { name: 'Find the traces worth opening before the incident window moves on.' })).toBeVisible()
+  await expect(page.getByText('POST /checkout')).toBeVisible()
+  await page.getByText('POST /checkout').first().click()
+  await expect(page.getByText('Trace detail')).toBeVisible()
+  await expect(page.getByText('POST /checkout across 3 services')).toBeVisible()
 })
 
 test('timeline renders recent trace lanes in the browser', async ({ page }) => {
@@ -54,6 +111,19 @@ test('trace detail supports switching between waterfall and flame views', async 
   await expect(page.locator('.flame-svg')).toBeVisible()
 })
 
+test('metrics page shows service health and can switch service focus', async ({ page }) => {
+  await page.goto('/metrics')
+
+  await expect(page.getByRole('heading', { name: /Watch rate, saturation signals, and tail latency/i })).toBeVisible()
+  await expect(page.getByText('Error budget watch')).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'POST /checkout' })).toBeVisible()
+
+  await page.getByLabel('Select service metrics').click()
+  await page.getByRole('option', { name: 'payments' }).click()
+  await expect(page.getByRole('cell', { name: 'authorize payment' })).toBeVisible()
+  await expect(page.getByText('Budget breached')).toBeVisible()
+})
+
 test('service map exposes selected service context', async ({ page }) => {
   await page.goto('/map')
 
@@ -64,10 +134,41 @@ test('service map exposes selected service context', async ({ page }) => {
   await expect(page.getByText('P99 latency')).toBeVisible()
 })
 
+test('compare page renders structural diff for two traces', async ({ page }) => {
+  await page.goto('/compare?base=trace-checkout&compare=trace-checkout-fast')
+
+  await expect(page.getByRole('heading', { name: 'Compare two executions on a shared time axis before you chase the wrong regression.' })).toBeVisible()
+  await expect(page.getByText('Duration delta')).toBeVisible()
+  await expect(page.getByText('Base trace', { exact: true })).toBeVisible()
+  await expect(page.getByText('Compare trace', { exact: true })).toBeVisible()
+  await expect(page.getByText('Only in base')).toBeVisible()
+})
+
+test('sampler page previews and applies a new strategy', async ({ page }) => {
+  await page.goto('/sampler')
+
+  await expect(page.getByRole('heading', { name: 'Tune trace fidelity against ingest cost without losing the operational context behind each decision.' })).toBeVisible()
+  await expect(page.getByText('Adaptive sampling').first()).toBeVisible()
+  await page.getByLabel('Select sampler strategy').click()
+  await page.getByRole('option', { name: 'Probabilistic' }).click()
+  await page.getByRole('button', { name: 'Preview change' }).click()
+  await expect(page.getByText('"type": "probabilistic"')).toBeVisible()
+  await page.getByRole('button', { name: 'Confirm' }).click()
+  await expect(page.getByTestId('current-sampler-type')).toHaveText('probabilistic')
+})
+
 test('the app error boundary shows a recovery UI', async ({ page }) => {
   await page.goto('/__e2e/error-boundary')
 
   await expect(page.getByTestId('app-error-boundary')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Reload app' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Back to traces' })).toBeVisible()
+})
+
+test('unknown routes recover back to trace search', async ({ page }) => {
+  await page.goto('/missing-route')
+
+  await expect(page.getByText('Page not found')).toBeVisible()
+  await page.getByRole('button', { name: 'Back to traces' }).click()
+  await expect(page.getByRole('heading', { name: 'Find the traces worth opening before the incident window moves on.' })).toBeVisible()
 })

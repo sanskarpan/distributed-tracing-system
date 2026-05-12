@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,16 +27,34 @@ func readMemStatsCached() runtime.MemStats {
 	return cachedMemStats
 }
 
-// HandleHealthz is a liveness probe: returns 200 as long as the process is running.
-func HandleHealthz(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]string{"status": "ok"})
+type ProbeState struct {
+	draining atomic.Bool
+}
+
+func NewProbeState() *ProbeState {
+	return &ProbeState{}
+}
+
+func (p *ProbeState) MarkDraining() {
+	p.draining.Store(true)
+}
+
+func (p *ProbeState) HandleHealthz(w http.ResponseWriter, r *http.Request) {
+	status := "ok"
+	if p.draining.Load() {
+		status = "draining"
+	}
+	writeJSON(w, map[string]string{"status": status})
 }
 
 // HandleReadyz is a readiness probe: returns 200 when the collector is ready to serve traffic.
-func HandleReadyz(w http.ResponseWriter, r *http.Request) {
+func (p *ProbeState) HandleReadyz(w http.ResponseWriter, r *http.Request) {
 	mem := readMemStatsCached()
+	if p.draining.Load() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
 	writeJSON(w, map[string]any{
-		"status":     "ready",
+		"status":     map[bool]string{true: "draining", false: "ready"}[p.draining.Load()],
 		"uptimeSec":  time.Since(startTime).Seconds(),
 		"goroutines": runtime.NumGoroutine(),
 		"heapMB":     mem.HeapAlloc / 1024 / 1024,

@@ -10,6 +10,16 @@
   gRPC OTLP listen address. Default `:4317`.
 - `API_KEY`
   Enables bearer-token protection for protected endpoints.
+- `HTTP_READ_HEADER_TIMEOUT`
+  HTTP request header timeout. Default `5s`.
+- `HTTP_READ_TIMEOUT`
+  Total HTTP request read timeout. Default `15s`.
+- `HTTP_WRITE_TIMEOUT`
+  HTTP response write timeout. Default `30s`.
+- `HTTP_IDLE_TIMEOUT`
+  Keep-alive idle timeout. Default `60s`.
+- `HTTP_MAX_HEADER_BYTES`
+  Maximum HTTP header size in bytes. Default `1048576`.
 
 ### Storage
 
@@ -75,10 +85,11 @@ The frontend is a static build served separately in development through Vite. In
 
 On shutdown:
 
-1. HTTP server begins graceful drain.
-2. gRPC server stops accepting work.
-3. pipeline workers drain accepted spans.
-4. deferred samplers flush pending decisions.
-5. assembler flushes pending traces to storage.
+1. Readiness flips from `ready` to `draining`, so `/readyz` returns `503` and upstream load balancers can stop routing new traffic.
+2. HTTP server begins graceful drain.
+3. gRPC server stops accepting work.
+4. pipeline workers drain accepted spans.
+5. deferred samplers flush pending decisions.
+6. assembler flushes pending traces to storage.
 
 This behavior is covered by backend tests and was added specifically to avoid dropping in-flight traces during process exit.
