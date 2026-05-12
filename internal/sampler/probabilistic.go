@@ -2,7 +2,6 @@ package sampler
 
 import (
 	"encoding/binary"
-	"fmt"
 	"math"
 	"sync"
 )
@@ -37,10 +36,9 @@ func (s *ProbabilisticSampler) ShouldSample(p SamplingParameters) SamplingResult
 	id := binary.BigEndian.Uint64(p.TraceID[:8])
 	s.mu.RLock()
 	threshold := s.threshold
-	rate := s.rate
 	s.mu.RUnlock()
 	if id < threshold {
-		return SamplingResult{Decision: Sample, Reason: fmt.Sprintf("probabilistic rate=%.4f", rate)}
+		return SamplingResult{Decision: Sample, Reason: "probabilistic sampled"}
 	}
 	return SamplingResult{Decision: Drop, Reason: "probabilistic dropped"}
 }

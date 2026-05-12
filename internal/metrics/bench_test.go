@@ -18,6 +18,7 @@ func BenchmarkMetricsStore_Record(b *testing.B) {
 		Status:      model.SpanStatus{Code: model.StatusOK},
 	}
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		store.Record(span)
@@ -34,6 +35,7 @@ func BenchmarkMetricsStore_Record_Parallel(b *testing.B) {
 		Status:      model.SpanStatus{Code: model.StatusOK},
 	}
 
+	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			store.Record(span)
@@ -56,6 +58,7 @@ func BenchmarkMetricsStore_Snapshot(b *testing.B) {
 		}
 	}
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		store.Snapshot()
