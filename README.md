@@ -27,6 +27,7 @@ Detailed project documentation now lives in [`docs/`](./docs/README.md):
 - [Operations Guide](./docs/operations.md)
 - [Development Guide](./docs/development.md)
 - [Frontend Audit](./docs/frontend-audit.md)
+- [Runbooks](./docs/runbooks.md)
 
 ## Architecture
 
@@ -69,6 +70,7 @@ Traffic Generator ──OTLP/HTTP──► Collector (Go)
 | `make test` | Run all Go tests |
 | `make race` | Run Go tests with `-race` |
 | `make build` | Build collector binary to `bin/collector` |
+| `make loadtest` | Run the k6 ingest load script |
 | `cd web && npm test` | Run frontend unit tests |
 | `cd web && npx tsc --noEmit` | TypeScript type check |
 
@@ -110,3 +112,14 @@ curl -X PUT http://localhost:4318/api/v1/sampler \
 | `GET` | `/sse/traces` | SSE stream: new trace events |
 | `GET` | `/sse/metrics` | SSE stream: metrics updates |
 | `GET` | `/sse/sampler` | SSE stream: sampler stat updates |
+
+## Deployment Assets
+
+- `docker-compose.yml`
+  Local multi-container stack with optional demo traffic and observability profile.
+- [`deploy/k8s/`](./deploy/k8s/README.md)
+  Kubernetes example manifests for collector and web services.
+- [`deploy/observability/`](./deploy/observability/README.md)
+  Prometheus scrape config and starter Grafana dashboard JSON.
+- [`loadtests/`](./loadtests/README.md)
+  Load-generation assets for collector ingest pressure testing.
