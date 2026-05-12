@@ -55,6 +55,12 @@ Operational characteristics:
 
 The frontend is a static build served separately in development through Vite. In production it can be deployed behind any static host or reverse proxy as long as API routes are proxied to the collector.
 
+### Deployment Examples
+
+- `docker-compose.yml` includes optional `demo` and `observability` profiles.
+- `deploy/k8s/` contains a baseline collector + web deployment for Kubernetes.
+- `deploy/observability/` contains Prometheus and Grafana starter assets.
+
 ## Observability
 
 ### Built-in
