@@ -20,9 +20,9 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  ResponsiveContainer,
 } from 'recharts'
 import { PageState } from '@/components/ui/page-state'
+import { ChartFrame } from '@/components/ui/chart-frame'
 import { getErrorMessage } from '@/lib/errors'
 
 interface ThroughputPoint {
@@ -266,15 +266,17 @@ export function SamplerPage() {
               </div>
               {history.length > 1 ? (
                 <div className="mt-4 h-[180px] min-w-0">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={history}>
+                  <ChartFrame className="h-full">
+                    {({ width, height }) => (
+                    <LineChart width={width} height={height} data={history}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="t" tick={{ fontSize: 9 }} />
                       <YAxis domain={[0, 100]} />
                       <Tooltip formatter={(v) => typeof v === 'number' ? `${v.toFixed(1)}%` : ''} />
                       <Line type="monotone" dataKey="rate" stroke="#2563eb" dot={false} name="Rate %" />
                     </LineChart>
-                  </ResponsiveContainer>
+                    )}
+                  </ChartFrame>
                 </div>
               ) : (
                 <div className="mt-4 rounded-[22px] border border-border/70 bg-background/70 p-4 text-sm text-muted-foreground">
