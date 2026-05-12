@@ -16,10 +16,13 @@ This repository now carries a dedicated `docs/` tree for system-level and contri
   Local workflows, testing, code layout, and contribution expectations.
 - [Frontend Audit](./frontend-audit.md)
   Production-readiness gaps found during the frontend audit and how they were resolved.
+- [Runbooks](./runbooks.md)
+  Operational response playbooks for common collector and UI incidents.
 
 ## Audience
 
 - New contributors should start with `development.md` and `architecture.md`.
 - Operators should start with `operations.md`.
+- On-call engineers should keep `runbooks.md` nearby.
 - Frontend contributors should read `frontend.md` and `frontend-audit.md`.
 - API consumers should use `api.md` plus the generated [`api/openapi.yaml`](../api/openapi.yaml).

@@ -5,8 +5,12 @@ services:
       dockerfile: Dockerfile
     ports:
       - "4318:4318"
+      - "4317:4317"
     environment:
       - TZ=UTC
+      - DATA_DIR=/var/lib/tracing
+    volumes:
+      - collector-data:/var/lib/tracing
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:4318/healthz"]
@@ -38,3 +42,29 @@ services:
     restart: unless-stopped
     profiles:
       - demo
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      collector:
+        condition: service_healthy
+    profiles:
+      - observability
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    profiles:
+      - observability
+
+volumes:
+  collector-data:

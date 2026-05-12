@@ -1,4 +1,4 @@
-.PHONY: build test race run demo dev lint
+.PHONY: build test race run demo dev lint loadtest
 
 build:
 	go build -o bin/collector ./cmd/collector
@@ -23,3 +23,6 @@ demo:
 lint:
 	go vet ./...
 	cd web && npx tsc --noEmit
+
+loadtest:
+	k6 run loadtests/k6/ingest-native-spans.js

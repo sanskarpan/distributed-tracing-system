@@ -9,7 +9,6 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
-  ResponsiveContainer,
   BarChart,
   Bar,
 } from 'recharts'
@@ -17,6 +16,7 @@ import { AlertTriangle, Gauge, ShieldAlert, Waves, Waypoints } from 'lucide-reac
 import { api } from '@/api/client'
 import { useSSE } from '@/hooks/useSSE'
 import { LatencyHeatmapChart } from '@/components/metrics/LatencyHeatmapChart'
+import { ChartFrame } from '@/components/ui/chart-frame'
 import type { MetricSnapshotDTO, AnomalyResult, SLOResult, LatencyHeatmapData } from '@/types'
 import {
   Select,
@@ -249,15 +249,17 @@ export function MetricsPage() {
           </div>
           <div className="mt-3 text-sm text-muted-foreground">See which operations are carrying the service volume right now.</div>
           <div className="mt-4 h-[210px] min-w-0">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData}>
+            <ChartFrame className="h-full">
+              {({ width, height }) => (
+              <LineChart width={width} height={height} data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" tick={{ fontSize: 10 }} />
                 <YAxis />
                 <Tooltip />
                 <Line type="monotone" dataKey="rate" stroke="#0f766e" dot={false} />
               </LineChart>
-            </ResponsiveContainer>
+              )}
+            </ChartFrame>
           </div>
         </div>
 
@@ -268,15 +270,17 @@ export function MetricsPage() {
           </div>
           <div className="mt-3 text-sm text-muted-foreground">Highlight the operations where reliability is degrading before latency spikes dominate.</div>
           <div className="mt-4 h-[210px] min-w-0">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData}>
+            <ChartFrame className="h-full">
+              {({ width, height }) => (
+              <AreaChart width={width} height={height} data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" tick={{ fontSize: 10 }} />
                 <YAxis />
                 <Tooltip formatter={(v) => typeof v === 'number' ? `${v.toFixed(1)}%` : ''} />
                 <Area type="monotone" dataKey="errorRate" stroke="#dc2626" fill="#fca5a5" fillOpacity={0.4} name="Error %" />
               </AreaChart>
-            </ResponsiveContainer>
+              )}
+            </ChartFrame>
           </div>
         </div>
 
@@ -287,8 +291,9 @@ export function MetricsPage() {
           </div>
           <div className="mt-3 text-sm text-muted-foreground">Track median behavior against the p95 and p99 edge where users begin to feel the incident.</div>
           <div className="mt-4 h-[210px] min-w-0">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData}>
+            <ChartFrame className="h-full">
+              {({ width, height }) => (
+              <LineChart width={width} height={height} data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" tick={{ fontSize: 10 }} />
                 <YAxis />
@@ -298,7 +303,8 @@ export function MetricsPage() {
                 <Line type="monotone" dataKey="p95" stroke="#d97706" dot={false} name="P95" />
                 <Line type="monotone" dataKey="p99" stroke="#dc2626" dot={false} name="P99" />
               </LineChart>
-            </ResponsiveContainer>
+              )}
+            </ChartFrame>
           </div>
         </div>
       </section>
@@ -308,8 +314,9 @@ export function MetricsPage() {
           <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">Percentile mix</div>
           <div className="mt-3 text-sm text-muted-foreground">Compare operation-level percentile stacks to spot where long-tail behavior dominates total service time.</div>
           <div className="mt-4 h-[220px] min-w-0">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData}>
+            <ChartFrame className="h-full">
+              {({ width, height }) => (
+              <BarChart width={width} height={height} data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" tick={{ fontSize: 10 }} />
                 <YAxis />
@@ -319,7 +326,8 @@ export function MetricsPage() {
                 <Bar dataKey="p95" stackId="lat" fill="#d97706" name="P95ms" />
                 <Bar dataKey="p99" stackId="lat" fill="#dc2626" name="P99ms" />
               </BarChart>
-            </ResponsiveContainer>
+              )}
+            </ChartFrame>
           </div>
         </div>
 
