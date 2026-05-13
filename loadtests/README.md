@@ -30,6 +30,8 @@ Supported environment variables:
   Number of spans per POST. Defaults to `20`.
 - `SERVICE_NAME`
   Service name prefix used in generated spans. Defaults to `loadgen`.
+- `API_KEY`
+  Optional bearer token for collectors that protect ingest/query endpoints.
 
 ## What It Exercises
 
@@ -38,3 +40,55 @@ Supported environment variables:
 - assembler and store throughput with a steady stream of short traces
 
 The script intentionally generates short parent/child traces so query, metrics, and sampler behavior all update during the run.
+
+## Mixed Read/Write Pressure
+
+```bash
+k6 run loadtests/k6/mixed-ingest-and-query.js
+```
+
+This profile combines:
+
+- native span ingest
+- trace search queries
+- dependency graph reads
+- RED metrics reads
+
+Use it when you want to validate that the collector and UI-facing query paths stay responsive while ingest is active.
+
+## Soak Profile
+
+```bash
+k6 run loadtests/k6/collector-soak.js
+```
+
+The soak profile ramps up gradually, holds steady for longer windows, and periodically checks:
+
+- `/readyz`
+- `/api/v1/traces`
+
+Use it in staging or pre-production when you want to observe:
+
+- queue saturation and readiness behavior
+- sustained ingest stability
+- query responsiveness over a longer run
+
+## Suggested Workflows
+
+Short ingest regression:
+
+```bash
+make loadtest
+```
+
+Mixed collector pressure:
+
+```bash
+make loadtest-mixed
+```
+
+Longer soak run:
+
+```bash
+make soaktest
+```
