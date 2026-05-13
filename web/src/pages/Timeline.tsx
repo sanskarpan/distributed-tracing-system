@@ -8,6 +8,7 @@ import { getServiceColor } from '@/lib/colors'
 import type { TraceSummaryDTO } from '@/types'
 import { PageState } from '@/components/ui/page-state'
 import { getErrorMessage } from '@/lib/errors'
+import { useElementSize } from '@/hooks/useElementSize'
 
 const LANE_HEIGHT = 28
 const LANE_GAP = 6
@@ -17,28 +18,67 @@ const PADDING_TOP = 32
 
 export function TimelinePage() {
   const navigate = useNavigate()
+  const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
+  const { width } = useElementSize(containerRef)
   const [traces, setTraces] = useState<TraceSummaryDTO[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const requestIdRef = useRef(0)
+  const refreshTimerRef = useRef<number | null>(null)
 
   const loadTraces = useCallback(() => {
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    const requestId = ++requestIdRef.current
+
     setError(null)
-    api.getTraces({ limit: 200, sortBy: 'receivedAt', sortDesc: 'false' })
-      .then(r => setTraces(r.traces))
-      .catch((err: unknown) => setError(getErrorMessage(err, 'Failed to load timeline traces.')))
-      .finally(() => setLoading(false))
+    api.getTraces({ limit: 200, sortBy: 'receivedAt', sortDesc: 'false' }, { signal: controller.signal })
+      .then((r) => {
+        if (requestId !== requestIdRef.current) return
+        setTraces(r.traces)
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          return
+        }
+        if (requestId !== requestIdRef.current) return
+        setError(getErrorMessage(err, 'Failed to load timeline traces.'))
+      })
+      .finally(() => {
+        if (requestId === requestIdRef.current) {
+          setLoading(false)
+        }
+      })
   }, [])
+
+  const scheduleReload = useCallback(() => {
+    if (refreshTimerRef.current !== null) {
+      return
+    }
+    refreshTimerRef.current = window.setTimeout(() => {
+      refreshTimerRef.current = null
+      loadTraces()
+    }, 400)
+  }, [loadTraces])
 
   useEffect(() => {
     const timer = window.setTimeout(loadTraces, 0)
-    return () => window.clearTimeout(timer)
+    return () => {
+      window.clearTimeout(timer)
+      if (refreshTimerRef.current !== null) {
+        window.clearTimeout(refreshTimerRef.current)
+      }
+      abortRef.current?.abort()
+    }
   }, [loadTraces])
 
   useSSE('/sse/traces', (event: unknown) => {
     const e = event as { type?: string }
     if (e.type === 'trace') {
-      loadTraces()
+      scheduleReload()
     }
   })
 
@@ -53,7 +93,7 @@ export function TimelinePage() {
     const minTime = Math.min(...times)
     const maxTime = Math.max(...times.map((t, i) => t + traces[i].durationMs))
 
-    const svgWidth = svgRef.current.clientWidth || 1200
+    const svgWidth = width || containerRef.current?.clientWidth || svgRef.current.clientWidth || 1200
     const chartWidth = svgWidth - LABEL_WIDTH
     const svgHeight = PADDING_TOP + services.length * LANE_STRIDE + 16
 
@@ -152,6 +192,7 @@ export function TimelinePage() {
       })
 
     traceGs.append('rect')
+      .attr('class', 'trace-hitbox')
       .attr('x', d => xScale(new Date(d.receivedAt).getTime()) - 1)
       .attr('y', d => {
         const lane = laneIndex.get(d.rootService || 'unknown') ?? 0
@@ -189,13 +230,13 @@ export function TimelinePage() {
             return label.length > 20 ? label.slice(0, 20) + '\u2026' : label
           })
 
-        traceGs.selectAll<SVGRectElement, TraceSummaryDTO>('rect:last-child')
+        traceGs.selectAll<SVGRectElement, TraceSummaryDTO>('.trace-hitbox')
           .attr('x', d => newXScale(new Date(d.receivedAt).getTime()) - 1)
           .attr('width', d => Math.max(5, w(d) + 2))
       })
 
     svg.call(zoom)
-  }, [traces, navigate])
+  }, [traces, navigate, width])
 
   useEffect(() => { draw() }, [draw])
 
@@ -262,7 +303,12 @@ export function TimelinePage() {
               {traces.length} traces across {services.length} service lane{services.length !== 1 ? 's' : ''}
             </span>
           </div>
-          <div className="p-4">
+          {error && (
+            <div className="border-b border-amber-300 bg-amber-50/95 px-5 py-3 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+              {error}
+            </div>
+          )}
+          <div ref={containerRef} className="p-4">
             <svg ref={svgRef} className="timeline-svg w-full" style={{ minHeight: 280 }} />
           </div>
         </section>

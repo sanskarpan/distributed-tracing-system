@@ -3,6 +3,7 @@ import { useEffect, useRef, useCallback } from 'react'
 import type { TraceDetailDTO, SpanDetailDTO } from '@/types'
 import { getServiceColor } from '@/lib/colors'
 import { buildSpanRows, type SpanRow } from './span-layout'
+import { useElementSize } from '@/hooks/useElementSize'
 
 const LABEL_WIDTH = 220
 const ROW_HEIGHT = 24
@@ -21,8 +22,10 @@ interface Props {
 }
 
 export function WaterfallChart({ trace, onSpanSelect, criticalPathIds, grayedSpanIds, highlightedSpanIds, durationDeltas }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const onSpanSelectRef = useRef(onSpanSelect)
+  const { width } = useElementSize(containerRef)
 
   useEffect(() => {
     onSpanSelectRef.current = onSpanSelect
@@ -35,7 +38,7 @@ export function WaterfallChart({ trace, onSpanSelect, criticalPathIds, grayedSpa
 
     const rows = buildSpanRows(trace)
     const totalDurationMs = trace.durationMs || 1
-    const svgWidth = svgRef.current.clientWidth || 1200
+    const svgWidth = width || containerRef.current?.clientWidth || svgRef.current.clientWidth || 1200
     const chartWidth = svgWidth - LABEL_WIDTH
     const svgHeight = PADDING_TOP + rows.length * ROW_STRIDE
 
@@ -154,6 +157,7 @@ export function WaterfallChart({ trace, onSpanSelect, criticalPathIds, grayedSpa
 
     // Row background for hover
     rowGs.append('rect')
+      .attr('class', 'row-hitbox')
       .attr('x', 0)
       .attr('y', 0)
       .attr('width', svgWidth)
@@ -185,6 +189,9 @@ export function WaterfallChart({ trace, onSpanSelect, criticalPathIds, grayedSpa
 
         rowGs.selectAll<SVGTextElement, SpanRow>('.delta-badge')
           .attr('x', d => newXScale(d.startMs + d.durationMs) + 4)
+
+        rowGs.selectAll<SVGRectElement, SpanRow>('.row-hitbox')
+          .attr('width', svgWidth)
       })
 
     svg.call(zoom)
@@ -211,14 +218,14 @@ export function WaterfallChart({ trace, onSpanSelect, criticalPathIds, grayedSpa
       .attr('height', Math.max(1, (MINIMAP_H - 8) / Math.max(rows.length, 1) - 1))
       .attr('fill', d => d.hasError ? '#dc2626' : getServiceColor(d.serviceName))
       .attr('fill-opacity', 0.6)
-  }, [trace, criticalPathIds, grayedSpanIds, highlightedSpanIds, durationDeltas])
+  }, [trace, criticalPathIds, grayedSpanIds, highlightedSpanIds, durationDeltas, width])
 
   useEffect(() => {
     draw()
   }, [draw])
 
   return (
-    <div className="relative w-full overflow-hidden rounded-lg border bg-background">
+    <div ref={containerRef} className="relative w-full overflow-hidden rounded-lg border bg-background">
       <svg ref={svgRef} className="w-full waterfall-svg" style={{ minHeight: 200 }} />
     </div>
   )
