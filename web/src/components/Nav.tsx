@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom'
 import { MoonStar, Sparkles, SunMedium } from 'lucide-react'
 import { useDarkMode } from '@/hooks/useDarkMode'
+import { SystemStatus } from '@/components/SystemStatus'
 
 const navItems = [
   { path: '/', label: 'Search' },
@@ -47,10 +48,12 @@ export function Nav() {
           ))}
         </div>
 
+        <SystemStatus />
+
         <button
           type="button"
           onClick={toggle}
-          className="ml-auto inline-flex items-center gap-2 rounded-2xl border border-border/70 bg-card/80 px-3 py-2 text-sm font-medium text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
+          className="inline-flex items-center gap-2 rounded-2xl border border-border/70 bg-card/80 px-3 py-2 text-sm font-medium text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
           title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
           aria-label="Toggle dark mode"
         >
