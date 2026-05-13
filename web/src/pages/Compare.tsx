@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { GitCompareArrows, Layers3, ScanSearch, TimerReset } from 'lucide-react'
 import { WaterfallChart } from '@/components/waterfall/WaterfallChart'
@@ -20,8 +20,15 @@ export function ComparePage() {
   const [diff, setDiff] = useState<TraceComparisonDTO | null>(null)
   const [loading, setLoading] = useState(Boolean(baseId && compareId))
   const [error, setError] = useState<string | null>(null)
+  const requestIdRef = useRef(0)
+  const abortRef = useRef<AbortController | null>(null)
 
   const loadComparison = useCallback(async (nextBaseId: string, nextCompareId: string) => {
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    const requestId = ++requestIdRef.current
+
     setLoading(true)
     setError(null)
     setBase(null)
@@ -30,17 +37,24 @@ export function ComparePage() {
 
     try {
       const [nextBase, nextCompare, nextDiff] = await Promise.all([
-        api.getTrace(nextBaseId),
-        api.getTrace(nextCompareId),
-        api.compareTraces(nextBaseId, nextCompareId),
+        api.getTrace(nextBaseId, { signal: controller.signal }),
+        api.getTrace(nextCompareId, { signal: controller.signal }),
+        api.compareTraces(nextBaseId, nextCompareId, { signal: controller.signal }),
       ])
+      if (requestId !== requestIdRef.current) return
       setBase(nextBase)
       setCompare(nextCompare)
       setDiff(nextDiff)
     } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return
+      }
+      if (requestId !== requestIdRef.current) return
       setError(getErrorMessage(err, 'Failed to load trace comparison.'))
     } finally {
-      setLoading(false)
+      if (requestId === requestIdRef.current) {
+        setLoading(false)
+      }
     }
   }, [])
 
@@ -50,7 +64,10 @@ export function ComparePage() {
       void loadComparison(baseId, compareId)
     }, 0)
 
-    return () => window.clearTimeout(timer)
+    return () => {
+      window.clearTimeout(timer)
+      abortRef.current?.abort()
+    }
   }, [baseId, compareId, loadComparison])
 
   const comparisonSummary = useMemo(() => {
