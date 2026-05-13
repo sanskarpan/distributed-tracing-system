@@ -50,6 +50,56 @@ interface TailPolicyDraft {
   rate: number
 }
 
+function readNumber(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+function readString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback
+}
+
+function buildRuleDrafts(config: Record<string, unknown>): RuleDraft[] {
+  const rawRules = Array.isArray(config.rules) ? config.rules : []
+  const drafts = rawRules
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null
+      const rule = entry as Record<string, unknown>
+      const samplerConfig = rule.sampler && typeof rule.sampler === 'object'
+        ? rule.sampler as Record<string, unknown>
+        : null
+      return {
+        id: ++nextRuleID,
+        operationGlob: readString(rule.operationGlob, '*'),
+        service: readString(rule.serviceName),
+        priority: readNumber(rule.priority, 10),
+        samplerType: readString(samplerConfig?.type, 'always'),
+        samplerRate: readNumber(samplerConfig?.rate, 0.1),
+      }
+    })
+    .filter((entry): entry is RuleDraft => entry !== null)
+
+  return drafts.length > 0 ? drafts : [{ id: ++nextRuleID, operationGlob: '*', service: '', priority: 10, samplerType: 'always', samplerRate: 1 }]
+}
+
+function buildTailPolicyDrafts(config: Record<string, unknown>): TailPolicyDraft[] {
+  const rawPolicies = Array.isArray(config.policies) ? config.policies : []
+  const drafts = rawPolicies
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null
+      const policy = entry as Record<string, unknown>
+      const type = readString(policy.type, 'error') as TailPolicyDraft['type']
+      return {
+        id: ++nextPolicyID,
+        type,
+        thresholdMs: readNumber(policy.thresholdMs, 500),
+        rate: readNumber(policy.rate, 0.1),
+      }
+    })
+    .filter((entry): entry is TailPolicyDraft => entry !== null)
+
+  return drafts.length > 0 ? drafts : [{ id: ++nextPolicyID, type: 'error', thresholdMs: 500, rate: 0.1 }]
+}
+
 const strategyDescriptions: Record<string, { title: string; summary: string; caution: string }> = {
   always: {
     title: 'Always sample',
@@ -106,14 +156,40 @@ export function SamplerPage() {
   const [tailPolicies, setTailPolicies] = useState<TailPolicyDraft[]>([])
   const [pendingBody, setPendingBody] = useState<Record<string, unknown> | null>(null)
   const [history, setHistory] = useState<ThroughputPoint[]>([])
+  const [hasLocalEdits, setHasLocalEdits] = useState(false)
   const prevSampled = useRef(0)
   const prevDropped = useRef(0)
+  const abortRef = useRef<AbortController | null>(null)
+  const requestIdRef = useRef(0)
+
+  const applyDraftFromConfig = useCallback((nextConfig: SamplerConfig) => {
+    const source = nextConfig.config
+    setSelectedType(nextConfig.type)
+    setProbRate(readNumber(source.rate, 0.1))
+    setRlTps(readNumber(source.tracesPerSec, 100))
+    setAdaptTarget(readNumber(source.targetRate, 100))
+    setAdaptMin(readNumber(source.minRate, 0.001))
+    setAdaptMax(readNumber(source.maxRate, 1))
+    setRules(buildRuleDrafts(source))
+    setTailTimeout(readNumber(source.bufferTimeoutSec, 10))
+    setTailPolicies(buildTailPolicyDrafts(source))
+    setPendingBody(null)
+    setHasLocalEdits(false)
+  }, [])
 
   const fetchConfig = useCallback(() => {
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    const requestId = ++requestIdRef.current
+
     setError(null)
-    api.getSampler().then((nextConfig) => {
+    api.getSampler({ signal: controller.signal }).then((nextConfig) => {
+      if (requestId !== requestIdRef.current) return
       setConfig(nextConfig)
-      setSelectedType(nextConfig.type)
+      if (!hasLocalEdits && pendingBody === null) {
+        applyDraftFromConfig(nextConfig)
+      }
 
       const now = new Date().toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
       const sampledDelta = nextConfig.stats.sampledTotal - prevSampled.current
@@ -126,9 +202,17 @@ export function SamplerPage() {
         return next.length > MAX_HISTORY ? next.slice(-MAX_HISTORY) : next
       })
     }).catch((err: unknown) => {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return
+      }
+      if (requestId !== requestIdRef.current) return
       setError(getErrorMessage(err, 'Failed to load sampler configuration.'))
-    }).finally(() => setLoading(false))
-  }, [])
+    }).finally(() => {
+      if (requestId === requestIdRef.current) {
+        setLoading(false)
+      }
+    })
+  }, [applyDraftFromConfig, hasLocalEdits, pendingBody])
 
   useEffect(() => {
     const timer = window.setTimeout(fetchConfig, 0)
@@ -136,6 +220,7 @@ export function SamplerPage() {
     return () => {
       window.clearTimeout(timer)
       clearInterval(iv)
+      abortRef.current?.abort()
     }
   }, [fetchConfig])
 
@@ -170,15 +255,71 @@ export function SamplerPage() {
     return body
   }
 
+  const validateDraft = (): string | null => {
+    if (selectedType === 'probabilistic' && (probRate < 0 || probRate > 1)) {
+      return 'Probabilistic rate must be between 0 and 1.'
+    }
+    if (selectedType === 'ratelimit' && rlTps <= 0) {
+      return 'Trace rate limit must be greater than 0.'
+    }
+    if (selectedType === 'adaptive') {
+      if (adaptTarget <= 0) return 'Adaptive target rate must be greater than 0.'
+      if (adaptMin < 0 || adaptMin > 1 || adaptMax < 0 || adaptMax > 1) {
+        return 'Adaptive min and max rates must be between 0 and 1.'
+      }
+      if (adaptMin > adaptMax) {
+        return 'Adaptive min rate must be less than or equal to the max rate.'
+      }
+    }
+    if (selectedType === 'rules') {
+      for (const rule of rules) {
+        if (!rule.operationGlob.trim()) {
+          return 'Each sampler rule needs an operation glob.'
+        }
+        if (rule.samplerType === 'probabilistic' && (rule.samplerRate < 0 || rule.samplerRate > 1)) {
+          return 'Rule-based probabilistic rates must stay between 0 and 1.'
+        }
+      }
+    }
+    if (selectedType === 'tail') {
+      if (tailTimeout <= 0) return 'Tail buffer timeout must be greater than 0.'
+      for (const policy of tailPolicies) {
+        if (policy.type === 'latency' && policy.thresholdMs <= 0) {
+          return 'Tail latency policies need a threshold greater than 0ms.'
+        }
+        if (policy.type === 'probabilistic' && (policy.rate < 0 || policy.rate > 1)) {
+          return 'Tail probabilistic rates must stay between 0 and 1.'
+        }
+      }
+    }
+    return null
+  }
+
   const handleConfirm = async () => {
     if (!pendingBody) return
     try {
       await api.putSampler(pendingBody)
       setPendingBody(null)
+      setHasLocalEdits(false)
       fetchConfig()
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to apply sampler configuration.'))
     }
+  }
+
+  const previewChange = () => {
+    const validationError = validateDraft()
+    if (validationError) {
+      setError(validationError)
+      return
+    }
+    setError(null)
+    setPendingBody(buildBody())
+  }
+
+  const markDirty = () => {
+    setHasLocalEdits(true)
+    setPendingBody(null)
   }
 
   const strategy = strategyDescriptions[selectedType] ?? strategyDescriptions.always
@@ -311,7 +452,7 @@ export function SamplerPage() {
         <CardContent className="space-y-5">
           <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
             <div className="space-y-3">
-              <Select value={selectedType} onValueChange={(value) => { setSelectedType(value); setPendingBody(null) }}>
+              <Select value={selectedType} onValueChange={(value) => { setSelectedType(value); markDirty() }}>
                 <SelectTrigger aria-label="Select sampler strategy" className="bg-background/70">
                   <SelectValue />
                 </SelectTrigger>
@@ -341,7 +482,7 @@ export function SamplerPage() {
                 <div className="space-y-2 rounded-[22px] border border-border/70 bg-background/70 p-4">
                   <div className="text-sm font-medium text-foreground">Head sampling rate</div>
                   <div className="text-xs text-muted-foreground">Rate: {(probRate * 100).toFixed(0)}%</div>
-                  <Slider value={[probRate * 100]} onValueChange={([v]) => setProbRate((v ?? 10) / 100)} min={0} max={100} step={1} />
+                  <Slider value={[probRate * 100]} onValueChange={([v]) => { setProbRate((v ?? 10) / 100); markDirty() }} min={0} max={100} step={1} />
                 </div>
               )}
 
@@ -353,7 +494,7 @@ export function SamplerPage() {
                     className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm"
                     value={rlTps}
                     min={1}
-                    onChange={(e) => setRlTps(Number(e.target.value))}
+                    onChange={(e) => { setRlTps(Number(e.target.value)); markDirty() }}
                   />
                 </div>
               )}
@@ -367,16 +508,16 @@ export function SamplerPage() {
                       className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm"
                       value={adaptTarget}
                       min={1}
-                      onChange={(e) => setAdaptTarget(Number(e.target.value))}
+                      onChange={(e) => { setAdaptTarget(Number(e.target.value)); markDirty() }}
                     />
                   </div>
                   <div className="space-y-2">
                     <div className="text-sm font-medium text-foreground">Minimum rate {(adaptMin * 100).toFixed(1)}%</div>
-                    <Slider value={[adaptMin * 100]} onValueChange={([v]) => setAdaptMin((v ?? 0.1) / 100)} min={0.1} max={100} step={0.1} />
+                    <Slider value={[adaptMin * 100]} onValueChange={([v]) => { setAdaptMin((v ?? 0.1) / 100); markDirty() }} min={0.1} max={100} step={0.1} />
                   </div>
                   <div className="space-y-2">
                     <div className="text-sm font-medium text-foreground">Maximum rate {(adaptMax * 100).toFixed(0)}%</div>
-                    <Slider value={[adaptMax * 100]} onValueChange={([v]) => setAdaptMax((v ?? 100) / 100)} min={1} max={100} step={1} />
+                    <Slider value={[adaptMax * 100]} onValueChange={([v]) => { setAdaptMax((v ?? 100) / 100); markDirty() }} min={1} max={100} step={1} />
                   </div>
                 </div>
               )}
@@ -391,28 +532,28 @@ export function SamplerPage() {
                           className="flex-1 rounded-lg border border-input bg-background px-2 py-1"
                           placeholder="Operation glob (e.g. HTTP GET *)"
                           value={rule.operationGlob}
-                          onChange={(e) => setRules((prev) => prev.map((entry, index) => index === i ? { ...entry, operationGlob: e.target.value } : entry))}
+                          onChange={(e) => { setRules((prev) => prev.map((entry, index) => index === i ? { ...entry, operationGlob: e.target.value } : entry)); markDirty() }}
                         />
                         <input
                           className="w-28 rounded-lg border border-input bg-background px-2 py-1"
                           placeholder="Service"
                           value={rule.service}
-                          onChange={(e) => setRules((prev) => prev.map((entry, index) => index === i ? { ...entry, service: e.target.value } : entry))}
+                          onChange={(e) => { setRules((prev) => prev.map((entry, index) => index === i ? { ...entry, service: e.target.value } : entry)); markDirty() }}
                         />
                         <input
                           type="number"
                           className="w-16 rounded-lg border border-input bg-background px-2 py-1"
                           placeholder="Priority"
                           value={rule.priority}
-                          onChange={(e) => setRules((prev) => prev.map((entry, index) => index === i ? { ...entry, priority: Number(e.target.value) } : entry))}
+                          onChange={(e) => { setRules((prev) => prev.map((entry, index) => index === i ? { ...entry, priority: Number(e.target.value) } : entry)); markDirty() }}
                         />
-                        <button type="button" className="text-red-600 hover:text-red-800" aria-label="Remove rule" onClick={() => setRules((prev) => prev.filter((_, index) => index !== i))}>✕</button>
+                        <button type="button" className="text-red-600 hover:text-red-800" aria-label="Remove rule" onClick={() => { setRules((prev) => prev.filter((_, index) => index !== i)); markDirty() }}>✕</button>
                       </div>
                       <div className="mt-2 flex gap-2 items-center">
                         <select
                           className="rounded-lg border border-input bg-background px-2 py-1"
                           value={rule.samplerType}
-                          onChange={(e) => setRules((prev) => prev.map((entry, index) => index === i ? { ...entry, samplerType: e.target.value } : entry))}
+                          onChange={(e) => { setRules((prev) => prev.map((entry, index) => index === i ? { ...entry, samplerType: e.target.value } : entry)); markDirty() }}
                         >
                           <option value="always">Always</option>
                           <option value="never">Never</option>
@@ -427,7 +568,7 @@ export function SamplerPage() {
                             min={0}
                             max={1}
                             value={rule.samplerRate}
-                            onChange={(e) => setRules((prev) => prev.map((entry, index) => index === i ? { ...entry, samplerRate: Number(e.target.value) } : entry))}
+                            onChange={(e) => { setRules((prev) => prev.map((entry, index) => index === i ? { ...entry, samplerRate: Number(e.target.value) } : entry)); markDirty() }}
                           />
                         )}
                       </div>
@@ -437,7 +578,7 @@ export function SamplerPage() {
                     type="button"
                     className="text-sm text-blue-600 hover:underline"
                     aria-label="Add sampler rule"
-                    onClick={() => setRules((prev) => [...prev, { id: ++nextRuleID, operationGlob: '*', service: '', priority: 10, samplerType: 'always', samplerRate: 1 }])}
+                    onClick={() => { setRules((prev) => [...prev, { id: ++nextRuleID, operationGlob: '*', service: '', priority: 10, samplerType: 'always', samplerRate: 1 }]); markDirty() }}
                   >
                     + Add rule
                   </button>
@@ -453,7 +594,7 @@ export function SamplerPage() {
                       className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm"
                       value={tailTimeout}
                       min={1}
-                      onChange={(e) => setTailTimeout(Number(e.target.value))}
+                      onChange={(e) => { setTailTimeout(Number(e.target.value)); markDirty() }}
                     />
                   </div>
                   <div className="space-y-2">
@@ -463,7 +604,7 @@ export function SamplerPage() {
                         <select
                           className="rounded-lg border border-input bg-background px-2 py-1"
                           value={policy.type}
-                          onChange={(e) => setTailPolicies((prev) => prev.map((entry, index) => index === i ? { ...entry, type: e.target.value as TailPolicyDraft['type'] } : entry))}
+                          onChange={(e) => { setTailPolicies((prev) => prev.map((entry, index) => index === i ? { ...entry, type: e.target.value as TailPolicyDraft['type'] } : entry)); markDirty() }}
                         >
                           <option value="error">Error</option>
                           <option value="latency">Latency</option>
@@ -475,7 +616,7 @@ export function SamplerPage() {
                             className="w-28 rounded-lg border border-input bg-background px-2 py-1"
                             placeholder="threshold ms"
                             value={policy.thresholdMs}
-                            onChange={(e) => setTailPolicies((prev) => prev.map((entry, index) => index === i ? { ...entry, thresholdMs: Number(e.target.value) } : entry))}
+                            onChange={(e) => { setTailPolicies((prev) => prev.map((entry, index) => index === i ? { ...entry, thresholdMs: Number(e.target.value) } : entry)); markDirty() }}
                           />
                         )}
                         {policy.type === 'probabilistic' && (
@@ -487,17 +628,17 @@ export function SamplerPage() {
                             min={0}
                             max={1}
                             value={policy.rate}
-                            onChange={(e) => setTailPolicies((prev) => prev.map((entry, index) => index === i ? { ...entry, rate: Number(e.target.value) } : entry))}
+                            onChange={(e) => { setTailPolicies((prev) => prev.map((entry, index) => index === i ? { ...entry, rate: Number(e.target.value) } : entry)); markDirty() }}
                           />
                         )}
-                        <button type="button" className="ml-auto text-red-600 hover:text-red-800" aria-label="Remove tail policy" onClick={() => setTailPolicies((prev) => prev.filter((_, index) => index !== i))}>✕</button>
+                        <button type="button" className="ml-auto text-red-600 hover:text-red-800" aria-label="Remove tail policy" onClick={() => { setTailPolicies((prev) => prev.filter((_, index) => index !== i)); markDirty() }}>✕</button>
                       </div>
                     ))}
                     <button
                       type="button"
                       className="text-sm text-blue-600 hover:underline"
                       aria-label="Add tail policy"
-                      onClick={() => setTailPolicies((prev) => [...prev, { id: ++nextPolicyID, type: 'error', thresholdMs: 500, rate: 0.1 }])}
+                      onClick={() => { setTailPolicies((prev) => [...prev, { id: ++nextPolicyID, type: 'error', thresholdMs: 500, rate: 0.1 }]); markDirty() }}
                     >
                       + Add policy
                     </button>
@@ -514,10 +655,15 @@ export function SamplerPage() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <Button onClick={() => setPendingBody(buildBody())}>
+            <Button onClick={previewChange}>
               <Activity className="mr-2 h-4 w-4" />
               Preview change
             </Button>
+            {config && (
+              <Button variant="outline" onClick={() => applyDraftFromConfig(config)} disabled={!hasLocalEdits && pendingBody === null}>
+                Reset draft
+              </Button>
+            )}
             <span className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/60 px-3 py-1.5 text-xs text-muted-foreground">
               <TimerReset className="h-3.5 w-3.5" />
               Changes apply immediately to new ingest decisions

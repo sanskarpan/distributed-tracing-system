@@ -133,11 +133,19 @@ export function ServiceMapPage() {
   const sidebarRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const requestIdRef = useRef(0)
 
   const loadGraph = useCallback(async () => {
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    const requestId = ++requestIdRef.current
+
     try {
       setError(null)
-      const g = await api.getDependencies()
+      const g = await api.getDependencies({ signal: controller.signal })
+      if (requestId !== requestIdRef.current) return
       setGraph(g)
 
       const maxCount = Math.max(...(g.edges.map((e: ServiceEdge) => e.count)), 1)
@@ -168,13 +176,34 @@ export function ServiceMapPage() {
         },
       }))
 
-      const laid = applyDagreLayout(rawNodes, rawEdges)
-      setNodes(laid)
+      setNodes((prevNodes) => {
+        const previousPositions = new Map(prevNodes.map((node) => [node.id, node.position]))
+        const canReusePositions =
+          prevNodes.length > 0 &&
+          prevNodes.length === rawNodes.length &&
+          rawNodes.every((node) => previousPositions.has(node.id))
+
+        if (canReusePositions) {
+          return rawNodes.map((node) => ({
+            ...node,
+            position: previousPositions.get(node.id) ?? node.position,
+          }))
+        }
+
+        return applyDagreLayout(rawNodes, rawEdges)
+      })
       setEdges(rawEdges)
+      setSelectedNode((prevSelected) => prevSelected ? g.services.find((service) => service.name === prevSelected.name) ?? null : null)
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return
+      }
+      if (requestId !== requestIdRef.current) return
       setError(getErrorMessage(err, 'Failed to load service dependency graph.'))
     } finally {
-      setLoading(false)
+      if (requestId === requestIdRef.current) {
+        setLoading(false)
+      }
     }
   }, [setNodes, setEdges])
 
@@ -186,6 +215,7 @@ export function ServiceMapPage() {
     return () => {
       window.clearTimeout(timer)
       clearInterval(interval)
+      abortRef.current?.abort()
     }
   }, [loadGraph])
 
@@ -263,6 +293,11 @@ export function ServiceMapPage() {
               {graph.services.length} services / {graph.edges.length} dependencies
             </span>
           </div>
+          {error && (
+            <div className="border-b border-amber-300 bg-amber-50/95 px-5 py-3 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+              {error}
+            </div>
+          )}
           <div className="h-[calc(100vh-320px)] min-h-[560px]">
             <ReactFlow
               nodes={nodes}
