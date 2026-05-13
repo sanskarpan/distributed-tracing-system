@@ -8,6 +8,7 @@ import type {
   AnomalyResult,
   SLOResult,
   HeatmapResponse,
+  CollectorReadyDTO,
 } from '@/types'
 
 const BASE = ''  // proxied by Vite
@@ -161,5 +162,9 @@ export const api = {
   async getSLOs(target?: number, options?: APIRequestOptions): Promise<{ slos: SLOResult[] }> {
     const qs = target !== undefined ? `?target=${target}` : ''
     return fetchJSON<{ slos: SLOResult[] }>(`/api/v1/metrics/slo${qs}`, options)
+  },
+
+  async getReadyz(options?: APIRequestOptions): Promise<CollectorReadyDTO> {
+    return fetchJSON<CollectorReadyDTO>('/readyz', options)
   },
 }
