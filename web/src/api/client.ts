@@ -18,6 +18,10 @@ type APIRequestOptions = RequestInit & {
   timeoutMs?: number
 }
 
+type FetchJSONOptions = APIRequestOptions & {
+  allowedStatuses?: number[]
+}
+
 function withTimeoutSignal(signal: AbortSignal | null | undefined, timeoutMs: number) {
   const controller = new AbortController()
   let abortedByTimeout = false
@@ -69,17 +73,19 @@ async function buildErrorMessage(res: Response): Promise<string> {
   return `HTTP ${res.status}: ${res.statusText}`
 }
 
-async function fetchJSON<T>(url: string, options?: APIRequestOptions): Promise<T> {
+async function fetchJSON<T>(url: string, options?: FetchJSONOptions): Promise<T> {
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const allowedStatuses = options?.allowedStatuses ?? []
   const callerSignal = options?.signal
   const requestOptions: RequestInit = { ...(options ?? {}) }
-  delete (requestOptions as APIRequestOptions).timeoutMs
-  delete (requestOptions as APIRequestOptions).signal
+  delete (requestOptions as FetchJSONOptions).timeoutMs
+  delete (requestOptions as FetchJSONOptions).allowedStatuses
+  delete (requestOptions as FetchJSONOptions).signal
   const { signal, cleanup, wasTimeout } = withTimeoutSignal(callerSignal, timeoutMs)
 
   try {
     const res = await fetch(`${BASE}${url}`, { ...requestOptions, signal })
-    if (!res.ok) {
+    if (!res.ok && !allowedStatuses.includes(res.status)) {
       throw new Error(await buildErrorMessage(res))
     }
     return res.json() as Promise<T>
@@ -165,6 +171,6 @@ export const api = {
   },
 
   async getReadyz(options?: APIRequestOptions): Promise<CollectorReadyDTO> {
-    return fetchJSON<CollectorReadyDTO>('/readyz', options)
+    return fetchJSON<CollectorReadyDTO>('/readyz', { ...options, allowedStatuses: [503] })
   },
 }

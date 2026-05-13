@@ -100,11 +100,48 @@ test('search page opens a trace from the result stream', async ({ page }) => {
   await page.goto('/')
 
   await expect(page.getByRole('heading', { name: 'Find the traces worth opening before the incident window moves on.' })).toBeVisible()
-  await expect(page.getByText('Collector ready')).toBeVisible()
+  await expect(page.getByTestId('collector-status-desktop')).toBeVisible()
+  await expect(page.getByTestId('collector-status-desktop')).toContainText('Collector ready')
   await expect(page.getByText('POST /checkout')).toBeVisible()
   await page.getByText('POST /checkout').first().click()
   await expect(page.getByText('Trace detail')).toBeVisible()
   await expect(page.getByText('POST /checkout across 3 services')).toBeVisible()
+})
+
+test('collector status reflects overloaded readiness instead of falling back to offline', async ({ page }) => {
+  await page.unroute('**/readyz')
+  await page.route('**/readyz', async (route) => {
+    await route.fulfill({
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status: 'overloaded',
+        uptimeSec: 128,
+        goroutines: 24,
+        heapMB: 7,
+        queueDepth: 900,
+        queueCapacity: 1024,
+        queueUsagePct: 0.88,
+        queueThreshold: 0.7,
+      }),
+    })
+  })
+
+  await page.goto('/')
+
+  await expect(page.getByTestId('collector-status-desktop')).toBeVisible()
+  await expect(page.getByTestId('collector-status-desktop')).toContainText('Collector overloaded')
+  await expect(page.getByTestId('collector-status-desktop')).toContainText('queue 900/1024')
+  await expect(page.getByText('Collector offline')).toHaveCount(0)
+})
+
+test('collector status remains visible on smaller screens', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/')
+
+  await expect(page.getByTestId('collector-status-mobile')).toBeVisible()
+  await expect(page.getByTestId('collector-status-mobile')).toContainText('Collector ready')
+  await expect(page.getByTestId('collector-status-mobile')).toContainText('queue 2/1024')
 })
 
 test('timeline renders recent trace lanes in the browser', async ({ page }) => {
@@ -230,5 +267,30 @@ test('unknown routes recover back to trace search', async ({ page }) => {
 
   await expect(page.getByText('Page not found')).toBeVisible()
   await page.getByRole('button', { name: 'Back to traces' }).click()
+  await expect(page.getByRole('heading', { name: 'Find the traces worth opening before the incident window moves on.' })).toBeVisible()
+})
+
+test('the app keeps rendering when browser storage is unavailable', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(Storage.prototype, 'getItem', {
+      configurable: true,
+      value() {
+        throw new Error('storage blocked')
+      },
+    })
+    Object.defineProperty(Storage.prototype, 'setItem', {
+      configurable: true,
+      value() {
+        throw new Error('storage blocked')
+      },
+    })
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: undefined,
+    })
+  })
+
+  await page.goto('/')
+
   await expect(page.getByRole('heading', { name: 'Find the traces worth opening before the incident window moves on.' })).toBeVisible()
 })
