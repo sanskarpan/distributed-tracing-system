@@ -43,27 +43,41 @@ export function SearchPage() {
   ])
 
   useEffect(() => {
-    api.getServices()
+    const controller = new AbortController()
+
+    api.getServices({ signal: controller.signal })
       .then(r => {
         setServices(r.services)
         setServicesError(null)
       })
       .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          return
+        }
         setServicesError(getErrorMessage(err, 'Failed to load services.'))
       })
+
+    return () => controller.abort()
   }, [setServices])
 
   useEffect(() => {
     if (filters.service) {
-      api.getOperations(filters.service)
+      const controller = new AbortController()
+
+      api.getOperations(filters.service, { signal: controller.signal })
         .then(r => {
           setOperations(r.operations)
           setOperationsError(null)
         })
         .catch((err: unknown) => {
+          if (err instanceof DOMException && err.name === 'AbortError') {
+            return
+          }
           setOperations([])
           setOperationsError(getErrorMessage(err, 'Failed to load operations.'))
         })
+
+      return () => controller.abort()
     }
   }, [filters.service])
 

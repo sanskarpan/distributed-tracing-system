@@ -12,6 +12,28 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { PageState } from '@/components/ui/page-state'
 import { getErrorMessage } from '@/lib/errors'
 
+async function copyText(value: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value)
+    return
+  }
+
+  const input = document.createElement('textarea')
+  input.value = value
+  input.setAttribute('readonly', 'true')
+  input.style.position = 'absolute'
+  input.style.left = '-9999px'
+  document.body.appendChild(input)
+  input.select()
+
+  const copied = document.execCommand('copy')
+  document.body.removeChild(input)
+
+  if (!copied) {
+    throw new Error('Clipboard access is unavailable in this browser context.')
+  }
+}
+
 export function TraceDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [trace, setTrace] = useState<TraceDetailDTO | null>(null)
@@ -22,35 +44,56 @@ export function TraceDetailPage() {
   const [viewMode, setViewMode] = useState<'waterfall' | 'flame'>('waterfall')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const spanIndexRef = useRef(0)
+  const requestIdRef = useRef(0)
+  const abortRef = useRef<AbortController | null>(null)
 
   const exportChart = useCallback((format: 'svg' | 'png') => {
     const svgEl = document.querySelector<SVGSVGElement>('.waterfall-svg, .flame-svg')
-    if (!svgEl) return
+    if (!svgEl) {
+      setActionError('The current chart is not ready to export yet.')
+      return
+    }
     const serializer = new XMLSerializer()
     const svgStr = serializer.serializeToString(svgEl)
-    if (format === 'svg') {
-      const blob = new Blob([svgStr], { type: 'image/svg+xml' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url; a.download = `trace-${id}.svg`; a.click()
-      URL.revokeObjectURL(url)
-    } else {
+    setActionError(null)
+
+    try {
+      if (format === 'svg') {
+        const blob = new Blob([svgStr], { type: 'image/svg+xml' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `trace-${id}.svg`
+        a.click()
+        URL.revokeObjectURL(url)
+        return
+      }
+
       const canvas = document.createElement('canvas')
       canvas.width = svgEl.clientWidth || 1200
       canvas.height = svgEl.clientHeight || 600
-      const ctx = canvas.getContext('2d')!
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        throw new Error('Canvas rendering is unavailable for PNG export.')
+      }
+
       const img = new Image()
+      img.onerror = () => setActionError('The browser could not render the SVG for PNG export.')
       img.onload = () => {
         ctx.fillStyle = 'white'
         ctx.fillRect(0, 0, canvas.width, canvas.height)
         ctx.drawImage(img, 0, 0)
         const a = document.createElement('a')
         a.href = canvas.toDataURL('image/png')
-        a.download = `trace-${id}.png`; a.click()
+        a.download = `trace-${id}.png`
+        a.click()
       }
-      img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgStr)))
+      img.src = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgStr)))}`
+    } catch (err: unknown) {
+      setActionError(getErrorMessage(err, 'Unable to export the current chart.'))
     }
   }, [id])
 
@@ -90,25 +133,42 @@ export function TraceDetailPage() {
   ])
 
   const copyLink = useCallback(() => {
-    navigator.clipboard.writeText(window.location.href).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
+    setActionError(null)
+    copyText(window.location.href)
+      .then(() => {
+        setCopied(true)
+        window.setTimeout(() => setCopied(false), 2000)
+      })
+      .catch((err: unknown) => {
+        setActionError(getErrorMessage(err, 'Unable to copy the trace URL.'))
+      })
   }, [])
 
   const reloadTrace = useCallback(async () => {
     if (!id) return
 
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    const requestId = ++requestIdRef.current
+
     setLoading(true)
     setError(null)
 
     try {
-      const nextTrace = await api.getTrace(id)
+      const nextTrace = await api.getTrace(id, { signal: controller.signal })
+      if (requestId !== requestIdRef.current) return
       setTrace(nextTrace)
     } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return
+      }
+      if (requestId !== requestIdRef.current) return
       setError(getErrorMessage(err, 'Failed to load trace detail.'))
     } finally {
-      setLoading(false)
+      if (requestId === requestIdRef.current) {
+        setLoading(false)
+      }
     }
   }, [id])
 
@@ -118,7 +178,10 @@ export function TraceDetailPage() {
       void reloadTrace()
     }, 0)
 
-    return () => window.clearTimeout(timer)
+    return () => {
+      window.clearTimeout(timer)
+      abortRef.current?.abort()
+    }
   }, [id, reloadTrace])
 
   const rootCauseSpan = trace?.errorCount && trace.errorCount > 0
@@ -306,6 +369,12 @@ export function TraceDetailPage() {
             </button>
           </div>
         </div>
+
+        {actionError && (
+          <div className="mt-4 rounded-2xl border border-amber-300 bg-amber-50/95 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+            {actionError}
+          </div>
+        )}
       </section>
 
       <section className="overflow-hidden rounded-[28px] border border-border/70 bg-card/88 p-4 shadow-[0_24px_90px_-52px_rgba(15,23,42,0.45)] backdrop-blur sm:p-5">

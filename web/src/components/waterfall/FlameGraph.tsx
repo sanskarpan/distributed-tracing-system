@@ -3,6 +3,7 @@ import { useEffect, useRef, useCallback } from 'react'
 import type { TraceDetailDTO, SpanDetailDTO } from '@/types'
 import { getServiceColor } from '@/lib/colors'
 import { buildSpanRows } from './span-layout'
+import { useElementSize } from '@/hooks/useElementSize'
 
 const ROW_HEIGHT = 22
 const ROW_GAP = 2
@@ -18,8 +19,10 @@ interface Props {
 }
 
 export function FlameGraph({ trace, onSpanSelect, criticalPathIds, grayedSpanIds, highlightedSpanIds }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const onSpanSelectRef = useRef(onSpanSelect)
+  const { width } = useElementSize(containerRef)
 
   useEffect(() => {
     onSpanSelectRef.current = onSpanSelect
@@ -32,7 +35,7 @@ export function FlameGraph({ trace, onSpanSelect, criticalPathIds, grayedSpanIds
 
     const rows = buildSpanRows(trace)
     const totalDurationMs = trace.durationMs || 1
-    const svgWidth = svgRef.current.clientWidth || 1200
+    const svgWidth = width || containerRef.current?.clientWidth || svgRef.current.clientWidth || 1200
     const maxDepth = Math.max(...rows.map(r => r.depth), 0)
     const svgHeight = PADDING_TOP + (maxDepth + 1) * ROW_STRIDE
 
@@ -111,6 +114,7 @@ export function FlameGraph({ trace, onSpanSelect, criticalPathIds, grayedSpanIds
 
     // Hover highlight
     spanGs.append('rect')
+      .attr('class', 'flame-hitbox')
       .attr('x', 0)
       .attr('y', 0)
       .attr('width', d => Math.max(1, xScale(d.startMs + d.durationMs) - xScale(d.startMs)))
@@ -159,19 +163,19 @@ export function FlameGraph({ trace, onSpanSelect, criticalPathIds, grayedSpanIds
         spanGs.selectAll<SVGRectElement, typeof rows[0]>('clipPath rect')
           .attr('width', d => Math.max(0, barWidth(d) - 4))
 
-        spanGs.selectAll<SVGRectElement, typeof rows[0]>('rect:last-child')
+        spanGs.selectAll<SVGRectElement, typeof rows[0]>('.flame-hitbox')
           .attr('width', barWidth)
       })
 
     svg.call(zoom)
-  }, [trace, criticalPathIds, grayedSpanIds, highlightedSpanIds])
+  }, [trace, criticalPathIds, grayedSpanIds, highlightedSpanIds, width])
 
   useEffect(() => {
     draw()
   }, [draw])
 
   return (
-    <div className="relative w-full overflow-hidden rounded-lg border bg-background">
+    <div ref={containerRef} className="relative w-full overflow-hidden rounded-lg border bg-background">
       <svg ref={svgRef} className="w-full flame-svg" style={{ minHeight: 120 }} />
     </div>
   )

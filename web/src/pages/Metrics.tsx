@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import {
   LineChart,
   Line,
@@ -40,25 +40,69 @@ export function MetricsPage() {
   const [heatmapData, setHeatmapData] = useState<LatencyHeatmapData>({ bounds: [], buckets: [] })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [warnings, setWarnings] = useState<string[]>([])
+  const requestIdRef = useRef(0)
+  const abortRef = useRef<AbortController | null>(null)
 
   const services = useMemo(() => [...new Set(metrics.map((metric) => metric.service))], [metrics])
   const effectiveSelectedService = selectedService || services[0] || ''
 
   const fetchMetrics = useCallback(() => {
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    const requestId = ++requestIdRef.current
+
     setError(null)
-    Promise.all([
-      api.getMetrics(),
-      api.getAnomalies(),
-      api.getSLOs(),
-      api.getHeatmap(effectiveSelectedService || undefined),
+
+    Promise.allSettled([
+      api.getMetrics({ signal: controller.signal }),
+      api.getAnomalies(undefined, { signal: controller.signal }),
+      api.getSLOs(undefined, { signal: controller.signal }),
+      api.getHeatmap(effectiveSelectedService || undefined, { signal: controller.signal }),
     ]).then(([metricsRes, anomaliesRes, slosRes, heatmapRes]) => {
-      setMetrics(metricsRes.metrics)
-      setAnomalies(anomaliesRes.anomalies?.filter((anomaly) => anomaly.isOutlier) ?? [])
-      setSlos(slosRes.slos ?? [])
-      setHeatmapData(heatmapRes.latency)
+      if (requestId !== requestIdRef.current) return
+
+      if (metricsRes.status !== 'fulfilled') {
+        throw metricsRes.reason
+      }
+
+      setMetrics(metricsRes.value.metrics)
+
+      const nextWarnings: string[] = []
+
+      if (anomaliesRes.status === 'fulfilled') {
+        setAnomalies(anomaliesRes.value.anomalies?.filter((anomaly) => anomaly.isOutlier) ?? [])
+      } else {
+        nextWarnings.push(`Anomaly queue unavailable: ${getErrorMessage(anomaliesRes.reason, 'Failed to load anomalies.')}`)
+      }
+
+      if (slosRes.status === 'fulfilled') {
+        setSlos(slosRes.value.slos ?? [])
+      } else {
+        nextWarnings.push(`SLO view unavailable: ${getErrorMessage(slosRes.reason, 'Failed to load SLOs.')}`)
+      }
+
+      if (heatmapRes.status === 'fulfilled') {
+        setHeatmapData(heatmapRes.value.latency)
+      } else {
+        nextWarnings.push(`Latency heatmap unavailable: ${getErrorMessage(heatmapRes.reason, 'Failed to load latency heatmap.')}`)
+      }
+
+      setWarnings(nextWarnings)
     })
-      .catch((err: unknown) => setError(getErrorMessage(err, 'Failed to load metrics.')))
-      .finally(() => setLoading(false))
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          return
+        }
+        if (requestId !== requestIdRef.current) return
+        setError(getErrorMessage(err, 'Failed to load metrics.'))
+      })
+      .finally(() => {
+        if (requestId === requestIdRef.current) {
+          setLoading(false)
+        }
+      })
   }, [effectiveSelectedService])
 
   useEffect(() => {
@@ -69,6 +113,7 @@ export function MetricsPage() {
     return () => {
       window.clearTimeout(timer)
       clearInterval(iv)
+      abortRef.current?.abort()
     }
   }, [fetchMetrics])
 
@@ -180,6 +225,12 @@ export function MetricsPage() {
       {error && (
         <div className="rounded-[24px] border border-amber-300 bg-amber-50/95 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
           {error}
+        </div>
+      )}
+
+      {warnings.length > 0 && (
+        <div className="rounded-[24px] border border-amber-300 bg-amber-50/95 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+          {warnings.join(' ')}
         </div>
       )}
 
@@ -322,9 +373,9 @@ export function MetricsPage() {
                 <YAxis />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="p50" stackId="lat" fill="#059669" name="P50ms" />
-                <Bar dataKey="p95" stackId="lat" fill="#d97706" name="P95ms" />
-                <Bar dataKey="p99" stackId="lat" fill="#dc2626" name="P99ms" />
+                <Bar dataKey="p50" fill="#059669" name="P50ms" />
+                <Bar dataKey="p95" fill="#d97706" name="P95ms" />
+                <Bar dataKey="p99" fill="#dc2626" name="P99ms" />
               </BarChart>
               )}
             </ChartFrame>

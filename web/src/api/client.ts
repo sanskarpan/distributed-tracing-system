@@ -11,19 +11,91 @@ import type {
 } from '@/types'
 
 const BASE = ''  // proxied by Vite
+const DEFAULT_TIMEOUT_MS = 15000
 
-async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${url}`, options)
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+type APIRequestOptions = RequestInit & {
+  timeoutMs?: number
+}
+
+function withTimeoutSignal(signal: AbortSignal | null | undefined, timeoutMs: number) {
+  const controller = new AbortController()
+  let abortedByTimeout = false
+
+  const abortFromCaller = () => controller.abort(signal?.reason)
+  const abortFromTimeout = () => {
+    abortedByTimeout = true
+    controller.abort(new DOMException(`Request timed out after ${timeoutMs}ms`, 'TimeoutError'))
   }
-  return res.json() as Promise<T>
+
+  const timeoutId = globalThis.setTimeout(abortFromTimeout, timeoutMs)
+
+  if (signal) {
+    if (signal.aborted) {
+      abortFromCaller()
+    } else {
+      signal.addEventListener('abort', abortFromCaller, { once: true })
+    }
+  }
+
+  return {
+    signal: controller.signal,
+    wasTimeout: () => abortedByTimeout,
+    cleanup: () => {
+      globalThis.clearTimeout(timeoutId)
+      signal?.removeEventListener('abort', abortFromCaller)
+    },
+  }
+}
+
+async function buildErrorMessage(res: Response): Promise<string> {
+  const contentType = res.headers.get('content-type') ?? ''
+  try {
+    if (contentType.includes('application/json')) {
+      const payload = await res.json() as { error?: string; message?: string }
+      const detail = payload.error ?? payload.message
+      if (detail) {
+        return `HTTP ${res.status}: ${detail}`
+      }
+    } else {
+      const text = (await res.text()).trim()
+      if (text) {
+        return `HTTP ${res.status}: ${text}`
+      }
+    }
+  } catch {
+    // Fall back to the status line when the response body is unavailable or malformed.
+  }
+  return `HTTP ${res.status}: ${res.statusText}`
+}
+
+async function fetchJSON<T>(url: string, options?: APIRequestOptions): Promise<T> {
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const callerSignal = options?.signal
+  const requestOptions: RequestInit = { ...(options ?? {}) }
+  delete (requestOptions as APIRequestOptions).timeoutMs
+  delete (requestOptions as APIRequestOptions).signal
+  const { signal, cleanup, wasTimeout } = withTimeoutSignal(callerSignal, timeoutMs)
+
+  try {
+    const res = await fetch(`${BASE}${url}`, { ...requestOptions, signal })
+    if (!res.ok) {
+      throw new Error(await buildErrorMessage(res))
+    }
+    return res.json() as Promise<T>
+  } catch (error) {
+    if (wasTimeout()) {
+      throw new Error(`Request timed out after ${timeoutMs}ms`, { cause: error })
+    }
+    throw error
+  } finally {
+    cleanup()
+  }
 }
 
 export const api = {
   async getTraces(
     params: Record<string, string | number | boolean | undefined>,
-    options?: RequestInit
+    options?: APIRequestOptions
   ): Promise<TraceListResponse> {
     const qs = new URLSearchParams()
     for (const [k, v] of Object.entries(params)) {
@@ -35,58 +107,59 @@ export const api = {
     return fetchJSON<TraceListResponse>(`/api/v1/traces${query}`, options)
   },
 
-  async getTrace(traceId: string): Promise<TraceDetailDTO> {
-    return fetchJSON<TraceDetailDTO>(`/api/v1/traces/${traceId}`)
+  async getTrace(traceId: string, options?: APIRequestOptions): Promise<TraceDetailDTO> {
+    return fetchJSON<TraceDetailDTO>(`/api/v1/traces/${traceId}`, options)
   },
 
-  async getServices(): Promise<{ services: string[] }> {
-    return fetchJSON<{ services: string[] }>('/api/v1/services')
+  async getServices(options?: APIRequestOptions): Promise<{ services: string[] }> {
+    return fetchJSON<{ services: string[] }>('/api/v1/services', options)
   },
 
-  async getOperations(service: string): Promise<{ operations: string[] }> {
-    return fetchJSON<{ operations: string[] }>(`/api/v1/operations?service=${encodeURIComponent(service)}`)
+  async getOperations(service: string, options?: APIRequestOptions): Promise<{ operations: string[] }> {
+    return fetchJSON<{ operations: string[] }>(`/api/v1/operations?service=${encodeURIComponent(service)}`, options)
   },
 
-  async getDependencies(): Promise<DependencyGraph> {
-    return fetchJSON<DependencyGraph>('/api/v1/dependencies')
+  async getDependencies(options?: APIRequestOptions): Promise<DependencyGraph> {
+    return fetchJSON<DependencyGraph>('/api/v1/dependencies', options)
   },
 
-  async getMetrics(): Promise<{ metrics: MetricSnapshotDTO[] }> {
-    return fetchJSON<{ metrics: MetricSnapshotDTO[] }>('/api/v1/metrics/red')
+  async getMetrics(options?: APIRequestOptions): Promise<{ metrics: MetricSnapshotDTO[] }> {
+    return fetchJSON<{ metrics: MetricSnapshotDTO[] }>('/api/v1/metrics/red', options)
   },
 
-  async getSampler(): Promise<SamplerConfig> {
-    return fetchJSON<SamplerConfig>('/api/v1/sampler')
+  async getSampler(options?: APIRequestOptions): Promise<SamplerConfig> {
+    return fetchJSON<SamplerConfig>('/api/v1/sampler', options)
   },
 
-  async putSampler(config: unknown): Promise<unknown> {
+  async putSampler(config: unknown, options?: APIRequestOptions): Promise<unknown> {
     return fetchJSON<unknown>('/api/v1/sampler', {
+      ...options,
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...(options?.headers ?? {}), 'Content-Type': 'application/json' },
       body: JSON.stringify(config),
     })
   },
 
-  async compareTraces(baseId: string, compareId: string): Promise<TraceComparisonDTO> {
-    return fetchJSON<TraceComparisonDTO>(`/api/v1/traces/compare?base=${baseId}&compare=${compareId}`)
+  async compareTraces(baseId: string, compareId: string, options?: APIRequestOptions): Promise<TraceComparisonDTO> {
+    return fetchJSON<TraceComparisonDTO>(`/api/v1/traces/compare?base=${baseId}&compare=${compareId}`, options)
   },
 
-  async getConfig(): Promise<{ logLinkTemplate?: string }> {
-    return fetchJSON<{ logLinkTemplate?: string }>('/api/v1/config')
+  async getConfig(options?: APIRequestOptions): Promise<{ logLinkTemplate?: string }> {
+    return fetchJSON<{ logLinkTemplate?: string }>('/api/v1/config', options)
   },
 
-  async getHeatmap(service?: string): Promise<HeatmapResponse> {
+  async getHeatmap(service?: string, options?: APIRequestOptions): Promise<HeatmapResponse> {
     const qs = service ? `?service=${encodeURIComponent(service)}` : ''
-    return fetchJSON<HeatmapResponse>(`/api/v1/metrics/heatmap${qs}`)
+    return fetchJSON<HeatmapResponse>(`/api/v1/metrics/heatmap${qs}`, options)
   },
 
-  async getAnomalies(zThreshold?: number): Promise<{ anomalies: AnomalyResult[] }> {
+  async getAnomalies(zThreshold?: number, options?: APIRequestOptions): Promise<{ anomalies: AnomalyResult[] }> {
     const qs = zThreshold !== undefined ? `?z=${zThreshold}` : ''
-    return fetchJSON<{ anomalies: AnomalyResult[] }>(`/api/v1/metrics/anomalies${qs}`)
+    return fetchJSON<{ anomalies: AnomalyResult[] }>(`/api/v1/metrics/anomalies${qs}`, options)
   },
 
-  async getSLOs(target?: number): Promise<{ slos: SLOResult[] }> {
+  async getSLOs(target?: number, options?: APIRequestOptions): Promise<{ slos: SLOResult[] }> {
     const qs = target !== undefined ? `?target=${target}` : ''
-    return fetchJSON<{ slos: SLOResult[] }>(`/api/v1/metrics/slo${qs}`)
+    return fetchJSON<{ slos: SLOResult[] }>(`/api/v1/metrics/slo${qs}`, options)
   },
 }

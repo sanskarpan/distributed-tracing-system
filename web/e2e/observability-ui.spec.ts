@@ -96,6 +96,7 @@ test('timeline renders recent trace lanes in the browser', async ({ page }) => {
 
   await expect(page.getByRole('heading', { name: 'Watch traces accumulate across services as the incident unfolds.' })).toBeVisible()
   await expect(page.locator('.timeline-svg')).toBeVisible()
+  await page.waitForSelector('.lanes text')
   await expect(page.locator('.lanes text').filter({ hasText: /^gateway$/ })).toBeVisible()
   await expect(page.getByText('3 traces across 3 service lanes')).toBeVisible()
 })
@@ -122,6 +123,22 @@ test('metrics page shows service health and can switch service focus', async ({ 
   await page.getByRole('option', { name: 'payments' }).click()
   await expect(page.getByRole('cell', { name: 'authorize payment' })).toBeVisible()
   await expect(page.getByText('Budget breached')).toBeVisible()
+})
+
+test('metrics page keeps core telemetry visible when a secondary endpoint fails', async ({ page }) => {
+  await page.route('**/api/v1/metrics/anomalies*', async (route) => {
+    await route.fulfill({
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: 'anomaly detector unavailable' }),
+    })
+  })
+
+  await page.goto('/metrics')
+
+  await expect(page.getByRole('heading', { name: /Watch rate, saturation signals, and tail latency/i })).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'POST /checkout' })).toBeVisible()
+  await expect(page.getByText(/Anomaly queue unavailable: HTTP 503: anomaly detector unavailable/)).toBeVisible()
 })
 
 test('service map exposes selected service context', async ({ page }) => {
@@ -155,6 +172,33 @@ test('sampler page previews and applies a new strategy', async ({ page }) => {
   await expect(page.getByText('"type": "probabilistic"')).toBeVisible()
   await page.getByRole('button', { name: 'Confirm' }).click()
   await expect(page.getByTestId('current-sampler-type')).toHaveText('probabilistic')
+})
+
+test('sampler page hydrates the draft from the backend config before previewing', async ({ page }) => {
+  const samplerState = {
+    type: 'probabilistic',
+    config: { rate: 0.35 },
+    stats: {
+      sampledTotal: 4200,
+      droppedTotal: 1800,
+      samplingRate: 0.35,
+    },
+  }
+
+  await page.route('**/api/v1/sampler', async (route) => {
+    if (route.request().method() === 'PUT') {
+      await route.fulfill({ json: { ok: true } })
+      return
+    }
+
+    await route.fulfill({ json: samplerState })
+  })
+
+  await page.goto('/sampler')
+
+  await expect(page.getByTestId('current-sampler-type')).toHaveText('probabilistic')
+  await page.getByRole('button', { name: 'Preview change' }).click()
+  await expect(page.locator('pre').filter({ hasText: '"type": "probabilistic"' })).toContainText('"rate": 0.35')
 })
 
 test('the app error boundary shows a recovery UI', async ({ page }) => {

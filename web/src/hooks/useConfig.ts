@@ -12,10 +12,14 @@ export function useConfig(): AppConfig {
 
   useEffect(() => {
     if (cachedConfig !== null) return
-    api.getConfig().then((c: AppConfig) => {
+    const controller = new AbortController()
+
+    api.getConfig({ signal: controller.signal }).then((c: AppConfig) => {
       cachedConfig = c
       setConfig(c)
     }).catch(() => {})
+
+    return () => controller.abort()
   }, [])
 
   return config
