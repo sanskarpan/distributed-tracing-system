@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"net/http"
+	"net/http/pprof"
+	"os"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -18,7 +20,7 @@ func SetupRoutes(ctx context.Context, r *chi.Mux, pipeline *Pipeline, store stor
 
 	// Wire pipeline worker pool shutdown to context
 	pipeline.StartWithContext(ctx)
-	probes := NewProbeState()
+	probes := NewProbeState(pipeline.QueueDepth, pipeline.QueueCapacity())
 
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Compress(5, "application/json", "text/plain", "text/html"))
@@ -80,6 +82,20 @@ func SetupRoutes(ctx context.Context, r *chi.Mux, pipeline *Pipeline, store stor
 		// Sampler
 		protected.Get("/api/v1/sampler", samplerH.HandleGetSampler)
 		protected.Put("/api/v1/sampler", samplerH.HandlePutSampler)
+
+		if os.Getenv("ENABLE_PPROF") == "true" {
+			protected.HandleFunc("/debug/pprof/", pprof.Index)
+			protected.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+			protected.HandleFunc("/debug/pprof/profile", pprof.Profile)
+			protected.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+			protected.HandleFunc("/debug/pprof/trace", pprof.Trace)
+			protected.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
+			protected.Handle("/debug/pprof/block", pprof.Handler("block"))
+			protected.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+			protected.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+			protected.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
+			protected.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+		}
 
 		// SSE
 		protected.Get("/sse/spans", func(w http.ResponseWriter, r *http.Request) {
