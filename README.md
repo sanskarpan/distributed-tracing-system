@@ -71,6 +71,8 @@ Traffic Generator ──OTLP/HTTP──► Collector (Go)
 | `make race` | Run Go tests with `-race` |
 | `make build` | Build collector binary to `bin/collector` |
 | `make loadtest` | Run the k6 ingest load script |
+| `make loadtest-mixed` | Run mixed ingest + query pressure |
+| `make soaktest` | Run the longer collector soak profile |
 | `cd web && npm test` | Run frontend unit tests |
 | `cd web && npx tsc --noEmit` | TypeScript type check |
 
