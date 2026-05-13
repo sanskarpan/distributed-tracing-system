@@ -208,6 +208,11 @@ func (p *Pipeline) QueueDepth() int {
 	return len(p.workCh)
 }
 
+// QueueCapacity returns the maximum number of spans that can wait in the worker queue.
+func (p *Pipeline) QueueCapacity() int {
+	return cap(p.workCh)
+}
+
 func (p *Pipeline) traceSamplingDecisionForSpan(s sampler.Sampler, span *model.Span, root *model.Span) sampler.SamplingResult {
 	decisionSpan := span
 	if root != nil {

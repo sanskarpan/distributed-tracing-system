@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+	"os"
+	"strconv"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -28,11 +30,18 @@ func readMemStatsCached() runtime.MemStats {
 }
 
 type ProbeState struct {
-	draining atomic.Bool
+	draining             atomic.Bool
+	queueDepth           func() int
+	queueCapacity        int
+	maxQueueUsagePercent float64
 }
 
-func NewProbeState() *ProbeState {
-	return &ProbeState{}
+func NewProbeState(queueDepth func() int, queueCapacity int) *ProbeState {
+	return &ProbeState{
+		queueDepth:           queueDepth,
+		queueCapacity:        queueCapacity,
+		maxQueueUsagePercent: envFloat("READINESS_MAX_QUEUE_USAGE_PCT", 0),
+	}
 }
 
 func (p *ProbeState) MarkDraining() {
@@ -50,13 +59,44 @@ func (p *ProbeState) HandleHealthz(w http.ResponseWriter, r *http.Request) {
 // HandleReadyz is a readiness probe: returns 200 when the collector is ready to serve traffic.
 func (p *ProbeState) HandleReadyz(w http.ResponseWriter, r *http.Request) {
 	mem := readMemStatsCached()
+	status := "ready"
+	queueDepth := 0
+	queueCapacity := p.queueCapacity
+	queueUsage := 0.0
+	if p.queueDepth != nil {
+		queueDepth = p.queueDepth()
+	}
+	if queueCapacity > 0 {
+		queueUsage = (float64(queueDepth) / float64(queueCapacity)) * 100
+	}
+
 	if p.draining.Load() {
+		status = "draining"
+		w.WriteHeader(http.StatusServiceUnavailable)
+	} else if p.maxQueueUsagePercent > 0 && queueCapacity > 0 && queueUsage >= p.maxQueueUsagePercent {
+		status = "overloaded"
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 	writeJSON(w, map[string]any{
-		"status":     map[bool]string{true: "draining", false: "ready"}[p.draining.Load()],
-		"uptimeSec":  time.Since(startTime).Seconds(),
-		"goroutines": runtime.NumGoroutine(),
-		"heapMB":     mem.HeapAlloc / 1024 / 1024,
+		"status":         status,
+		"uptimeSec":      time.Since(startTime).Seconds(),
+		"goroutines":     runtime.NumGoroutine(),
+		"heapMB":         mem.HeapAlloc / 1024 / 1024,
+		"queueDepth":     queueDepth,
+		"queueCapacity":  queueCapacity,
+		"queueUsagePct":  queueUsage,
+		"queueThreshold": p.maxQueueUsagePercent,
 	})
+}
+
+func envFloat(key string, fallback float64) float64 {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
 }

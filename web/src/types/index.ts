@@ -170,3 +170,14 @@ export interface TraceComparisonDTO {
   onlyInBase: string[]
   onlyInCompare: string[]
 }
+
+export interface CollectorReadyDTO {
+  status: 'ready' | 'draining' | 'overloaded' | string
+  uptimeSec: number
+  goroutines: number
+  heapMB: number
+  queueDepth: number
+  queueCapacity: number
+  queueUsagePct: number
+  queueThreshold: number
+}

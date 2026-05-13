@@ -13,6 +13,7 @@ export const options = {
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:4318'
 const BATCH_SIZE = Number(__ENV.BATCH_SIZE || 20)
 const SERVICE_NAME = __ENV.SERVICE_NAME || 'loadgen'
+const API_KEY = __ENV.API_KEY || ''
 
 function hex(bytes) {
   let out = ''
@@ -60,7 +61,10 @@ export default function () {
   }
 
   const res = http.post(`${BASE_URL}/api/v1/spans`, JSON.stringify({ spans }), {
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {}),
+    },
   })
 
   check(res, {

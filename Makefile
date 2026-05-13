@@ -1,4 +1,4 @@
-.PHONY: build test race run demo dev lint loadtest
+.PHONY: build test race run demo dev lint loadtest loadtest-mixed soaktest
 
 build:
 	go build -o bin/collector ./cmd/collector
@@ -26,3 +26,9 @@ lint:
 
 loadtest:
 	k6 run loadtests/k6/ingest-native-spans.js
+
+loadtest-mixed:
+	k6 run loadtests/k6/mixed-ingest-and-query.js
+
+soaktest:
+	k6 run loadtests/k6/collector-soak.js

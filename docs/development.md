@@ -21,12 +21,20 @@ go test ./... -run TestName
 
 ```bash
 make loadtest
+make loadtest-mixed
+make soaktest
 ```
 
 Or run the k6 script directly with custom environment variables:
 
 ```bash
 BASE_URL=http://localhost:4318 BATCH_SIZE=25 k6 run loadtests/k6/ingest-native-spans.js
+```
+
+For authenticated environments:
+
+```bash
+BASE_URL=http://localhost:4318 API_KEY=secret k6 run loadtests/k6/mixed-ingest-and-query.js
 ```
 
 ### Frontend

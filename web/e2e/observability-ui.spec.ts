@@ -37,6 +37,21 @@ test.beforeEach(async ({ page }) => {
     await route.fulfill({ json: { logLinkTemplate: 'https://logs.example.com/trace/{traceId}/span/{spanId}' } })
   })
 
+  await page.route('**/readyz', async (route) => {
+    await route.fulfill({
+      json: {
+        status: 'ready',
+        uptimeSec: 128,
+        goroutines: 24,
+        heapMB: 7,
+        queueDepth: 2,
+        queueCapacity: 1024,
+        queueUsagePct: 0.2,
+        queueThreshold: 0,
+      },
+    })
+  })
+
   await page.route('**/api/v1/dependencies', async (route) => {
     await route.fulfill({ json: dependencyGraphResponse })
   })
@@ -85,6 +100,7 @@ test('search page opens a trace from the result stream', async ({ page }) => {
   await page.goto('/')
 
   await expect(page.getByRole('heading', { name: 'Find the traces worth opening before the incident window moves on.' })).toBeVisible()
+  await expect(page.getByText('Collector ready')).toBeVisible()
   await expect(page.getByText('POST /checkout')).toBeVisible()
   await page.getByText('POST /checkout').first().click()
   await expect(page.getByText('Trace detail')).toBeVisible()

@@ -271,6 +271,26 @@ func TestAPI_ZipkinAccepts64BitTraceIDs(t *testing.T) {
 	assert.Equal(t, float64(1), detail["spanCount"])
 }
 
+func TestAPI_PprofEndpointRequiresAuthAndCanBeEnabled(t *testing.T) {
+	t.Setenv("ENABLE_PPROF", "true")
+	srv := testServerWithAPIKey(t, "secret-key")
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/debug/pprof/")
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/debug/pprof/", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer secret-key")
+
+	resp, err = http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
 // TestAPI_SamplerPutThenGet verifies that PUT /api/v1/sampler changes the sampler type.
 func TestAPI_SamplerPutThenGet(t *testing.T) {
 	srv := testServer(t)
@@ -605,7 +625,7 @@ func TestAPI_PublicProbeAndSpecEndpointsRemainUnauthenticated(t *testing.T) {
 }
 
 func TestAPI_ReadyzReturns503WhenCollectorIsDraining(t *testing.T) {
-	probes := api.NewProbeState()
+	probes := api.NewProbeState(func() int { return 0 }, 0)
 	probes.MarkDraining()
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)

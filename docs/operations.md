@@ -20,6 +20,10 @@
   Keep-alive idle timeout. Default `60s`.
 - `HTTP_MAX_HEADER_BYTES`
   Maximum HTTP header size in bytes. Default `1048576`.
+- `READINESS_MAX_QUEUE_USAGE_PCT`
+  Optional readiness trip point. When set to a value greater than `0`, `/readyz` returns `503` with status `overloaded` once the worker queue usage reaches or exceeds this percentage.
+- `ENABLE_PPROF`
+  When set to `true`, enables protected `/debug/pprof/*` endpoints behind the same API key middleware as the rest of the control plane.
 
 ### Storage
 
@@ -70,11 +74,13 @@ The frontend is a static build served separately in development through Vite. In
 - `/metrics`
 - `/api/v1/stats`
 - `/api/v1/sampler`
+- `/debug/pprof/*` when `ENABLE_PPROF=true`
 - frontend live metrics and sampler pages
 
 ### Important Signals
 
 - queue depth
+- queue saturation percentage
 - sampled vs dropped totals
 - trace count/max trace count
 - service-level rate/error/latency
@@ -83,9 +89,21 @@ The frontend is a static build served separately in development through Vite. In
 ## Failure Modes to Watch
 
 - high ingest with constrained memory-backed storage
+- readiness staying green while the worker queue is saturating
 - slow frontend clients causing SSE event drops
 - large trace visualizations stressing browser rendering
 - sampler misconfiguration producing unexpected throughput
+
+## Debugging Profiles
+
+If `ENABLE_PPROF=true` is enabled in a trusted environment, you can inspect:
+
+- `/debug/pprof/heap`
+- `/debug/pprof/goroutine`
+- `/debug/pprof/profile`
+- `/debug/pprof/trace`
+
+These endpoints are protected by `API_KEY` when authentication is enabled. They should not be exposed publicly without an access boundary.
 
 ## Shutdown Semantics
 
