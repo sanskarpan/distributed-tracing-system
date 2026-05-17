@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -44,9 +45,10 @@ func testServerWithAPIKey(t *testing.T, apiKey string) *httptest.Server {
 
 	r := chi.NewRouter()
 	authConfig := api.LoadAuthConfig(apiKey)
+	replicator := api.NewReplicatorFromEnv()
 	alertManager := api.NewAlertManager(metricsStore, nil)
 	lifecycleHandler := api.NewLifecycleHandler(store, analysis.NewAnalyzer())
-	api.SetupRoutes(ctx, r, pipeline, store, metricsStore, sseBus, authConfig, alertManager, lifecycleHandler)
+	api.SetupRoutes(ctx, r, pipeline, store, metricsStore, sseBus, authConfig, alertManager, lifecycleHandler, replicator)
 	return httptest.NewServer(r)
 }
 
@@ -411,6 +413,30 @@ func TestAPI_TraceLifecycleArchiveDeleteRestore(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestAPI_ReplicatesNativeIngestToPeers(t *testing.T) {
+	var replicationCalls atomic.Int64
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		replicationCalls.Add(1)
+		assert.Equal(t, "1", r.Header.Get("X-Trace-Replication"))
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(body), `"spans"`)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer peer.Close()
+
+	t.Setenv("REPLICA_PEERS", peer.URL)
+	srv := testServer(t)
+	defer srv.Close()
+
+	_, _, body := spanBody(t)
+	ingestAndWait(t, srv, body)
+
+	require.Eventually(t, func() bool {
+		return replicationCalls.Load() == 1
+	}, time.Second, 20*time.Millisecond)
 }
 
 func TestAPI_AlertWebhookReceivesActiveAlerts(t *testing.T) {
