@@ -54,7 +54,7 @@ Traffic Generator ──OTLP/HTTP──► Collector (Go)
 - Server-Sent Events bus for live UI updates
 - In-memory store with configurable eviction (default 10k traces)
 - Static token RBAC with tenant-aware ingest/query isolation
-- Lifecycle import, archive, restore, and delete APIs for operational workflows
+- Optional peer replication and lifecycle/archive APIs for operational workflows
 
 **Frontend** (`web`) — React 18 + TypeScript + Vite:
 - **Search** — filter traces by service, operation, duration, error status, time range
@@ -76,7 +76,7 @@ Traffic Generator ──OTLP/HTTP──► Collector (Go)
 | `make loadtest` | Run the k6 ingest load script |
 | `make loadtest-mixed` | Run mixed ingest + query pressure |
 | `make soaktest` | Run the longer collector soak profile |
-| `make integration` | Run the API integration suite for auth, lifecycle, and alerting |
+| `make integration` | Run the API integration suite for auth, lifecycle, replication, and alerting |
 | `make helm-lint` | Lint and render the Helm chart |
 | `make release-dry-run` | Run a local release packaging dry run |
 | `cd web && npm test` | Run frontend unit tests |
