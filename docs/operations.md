@@ -31,10 +31,16 @@
 
 - `DATA_DIR`
   Enables Badger-backed durable storage.
+- `STORE_BACKEND`
+  Selects `memory` or `badger`. Defaults to `badger` when `DATA_DIR` is set, otherwise `memory`.
 - `TRACE_TTL`
   Enables retention eviction for the in-memory store.
 - `ARCHIVE_DIR`
   Filesystem location for lifecycle archive snapshots.
+- `REPLICA_PEERS`
+  Comma-separated collector peer URLs for native ingest fan-out.
+- `REPLICA_API_TOKEN`
+  Optional bearer token used when fan-out replication targets protected peers.
 
 ### TLS
 
@@ -60,6 +66,8 @@ Operational characteristics:
 
 - in-memory query path by default
 - optional durable persistence with Badger
+- explicit store backend selection
+- optional peer replication fan-out for edge-to-peer ingest duplication
 - HTTP and gRPC receivers in the same process
 - graceful shutdown now drains HTTP requests, sampler buffers, worker queues, and pending assembler traces
 - tenant-aware ingest, query, alerting, and trace lifecycle operations
@@ -92,6 +100,7 @@ The frontend is a static build served separately in development through Vite. In
 - queue depth
 - queue saturation percentage
 - sampled vs dropped totals
+- replication successes/failures/in-flight
 - trace count/max trace count
 - service-level rate/error/latency
 - anomalous latency spikes

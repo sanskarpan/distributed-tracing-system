@@ -13,6 +13,7 @@ Key values:
 
 - `collector.image.*`
 - `collector.env.authTokens`
+- `collector.env.replicaPeers`
 - `collector.env.alertWebhookUrl`
 - `collector.persistence.*`
 - `web.image.*`
