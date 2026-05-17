@@ -24,6 +24,8 @@ spec:
             - name: grpc
               containerPort: {{ .Values.collector.grpcPort }}
           env:
+            - name: STORE_BACKEND
+              value: {{ .Values.collector.env.storeBackend | quote }}
             - name: DATA_DIR
               value: {{ .Values.collector.env.dataDir | quote }}
             - name: READINESS_MAX_QUEUE_USAGE_PCT
@@ -32,6 +34,10 @@ spec:
               value: {{ .Values.collector.env.enablePprof | quote }}
             - name: AUTH_TOKENS
               value: {{ .Values.collector.env.authTokens | quote }}
+            - name: REPLICA_PEERS
+              value: {{ .Values.collector.env.replicaPeers | quote }}
+            - name: REPLICA_API_TOKEN
+              value: {{ .Values.collector.env.replicaApiToken | quote }}
             - name: ALERT_WEBHOOK_URL
               value: {{ .Values.collector.env.alertWebhookUrl | quote }}
             - name: ARCHIVE_DIR
