@@ -27,12 +27,14 @@ const BASE_URL = __ENV.BASE_URL || 'http://localhost:4318'
 const BATCH_SIZE = Number(__ENV.BATCH_SIZE || 16)
 const SERVICE_NAME = __ENV.SERVICE_NAME || 'mixed-load'
 const API_KEY = __ENV.API_KEY || ''
+const TENANT_ID = __ENV.TENANT_ID || ''
 
 function requestParams(tags) {
   return {
     headers: {
       'Content-Type': 'application/json',
       ...(API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {}),
+      ...(TENANT_ID ? { 'X-Tenant-ID': TENANT_ID } : {}),
     },
     tags,
   }

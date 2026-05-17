@@ -32,6 +32,8 @@ Supported environment variables:
   Service name prefix used in generated spans. Defaults to `loadgen`.
 - `API_KEY`
   Optional bearer token for collectors that protect ingest/query endpoints.
+- `TENANT_ID`
+  Optional tenant scope header for multi-tenant deployments.
 
 ## What It Exercises
 

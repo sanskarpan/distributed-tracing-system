@@ -1,4 +1,4 @@
-.PHONY: build test race run demo dev lint loadtest loadtest-mixed soaktest
+.PHONY: build test race run demo dev lint loadtest loadtest-mixed soaktest integration helm-lint release-dry-run
 
 build:
 	go build -o bin/collector ./cmd/collector
@@ -32,3 +32,13 @@ loadtest-mixed:
 
 soaktest:
 	k6 run loadtests/k6/collector-soak.js
+
+integration:
+	go test ./api -run 'TestAPI_(RBACAndTenantIsolation|TraceLifecycleArchiveDeleteRestore|AlertWebhookReceivesActiveAlerts)$$' -count=1
+
+helm-lint:
+	helm lint deploy/helm/tracing
+	helm template tracing deploy/helm/tracing > /tmp/tracing-chart.yaml
+
+release-dry-run:
+	goreleaser release --clean --skip=publish
