@@ -7,8 +7,9 @@ The system is a single-process tracing collector with a browser-based analysis U
 1. Clients send spans through OTLP/HTTP, native JSON, or Zipkin JSON.
 2. The collector validates spans, applies sampling, enriches metadata, records metrics, and assembles traces.
 3. Completed traces are stored in memory or in Badger-backed durable storage.
-4. Query APIs expose traces, metrics, alerts, dependency graphs, lifecycle operations, and sampler state.
-5. The frontend consumes APIs directly and uses SSE for live updates.
+4. Optional peer replication can fan native ingest batches to additional collectors.
+5. Query APIs expose traces, metrics, alerts, dependency graphs, lifecycle operations, and sampler state.
+6. The frontend consumes APIs directly and uses SSE for live updates.
 
 ## Runtime Topology
 
@@ -18,6 +19,9 @@ apps / demo traffic
     +--> OTLP HTTP     POST /v1/traces
     +--> Native JSON   POST /api/v1/spans
     +--> Zipkin JSON   POST /api/v2/spans
+                |
+                v
+         auth + tenant context
                 |
                 v
          api.Pipeline
@@ -56,6 +60,8 @@ apps / demo traffic
   Alert evaluation and webhook delivery.
 - `api/lifecycle.go`
   Import, delete, archive, and restore handlers.
+- `api/replication.go`
+  Async peer fan-out for native span replication.
 - `api/handler_*.go`
   Endpoint-level request parsing and response shaping.
 - `api/pipeline.go`
@@ -159,6 +165,6 @@ The store layer is now tenant-aware and supports destructive lifecycle operation
 
 ## Known Tradeoffs
 
-- Storage is still single-collector scoped unless you layer external replication around it.
+- Replication is fan-out based rather than a consensus-backed cluster.
 - Live frontend state is still page-centric, not globally normalized.
 - Some visualization pages remain rich-client heavy despite route-level code splitting.
