@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,26 +30,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	var store storage.TraceStore
-	if dataDir := os.Getenv("DATA_DIR"); dataDir != "" {
-		bs, err := storage.OpenBadger(dataDir, 10000)
-		if err != nil {
-			log.Fatalf("badger open: %v", err)
-		}
-		defer bs.Close()
-		store = bs
-		log.Printf("using BadgerDB persistence at %s", dataDir)
-	} else {
-		mem := storage.NewMemoryStore(10000)
-		if ttlStr := os.Getenv("TRACE_TTL"); ttlStr != "" {
-			if ttl, err := time.ParseDuration(ttlStr); err == nil && ttl > 0 {
-				mem.StartRetention(ctx, ttl, ttl/10)
-				log.Printf("trace retention enabled: TTL=%s", ttl)
-			} else {
-				log.Printf("invalid TRACE_TTL %q, retention disabled", ttlStr)
-			}
-		}
-		store = mem
+	store, cleanupStore := mustOpenStore(ctx)
+	if cleanupStore != nil {
+		defer cleanupStore()
 	}
 
 	metricsStore := metrics.NewMetricsStore()
@@ -120,6 +104,45 @@ func main() {
 	grpcSrv.GracefulStop()
 	if err := pipeline.Shutdown(shutdownCtx); err != nil {
 		log.Printf("pipeline shutdown: %v", err)
+	}
+}
+
+func mustOpenStore(ctx context.Context) (storage.TraceStore, func()) {
+	storeBackend := strings.TrimSpace(os.Getenv("STORE_BACKEND"))
+	dataDir := strings.TrimSpace(os.Getenv("DATA_DIR"))
+	if storeBackend == "" {
+		if dataDir != "" {
+			storeBackend = "badger"
+		} else {
+			storeBackend = "memory"
+		}
+	}
+
+	switch storeBackend {
+	case "memory":
+		mem := storage.NewMemoryStore(10000)
+		if ttlStr := os.Getenv("TRACE_TTL"); ttlStr != "" {
+			if ttl, err := time.ParseDuration(ttlStr); err == nil && ttl > 0 {
+				mem.StartRetention(ctx, ttl, ttl/10)
+				log.Printf("trace retention enabled: TTL=%s", ttl)
+			} else {
+				log.Printf("invalid TRACE_TTL %q, retention disabled", ttlStr)
+			}
+		}
+		return mem, nil
+	case "badger":
+		if dataDir == "" {
+			dataDir = "data"
+		}
+		bs, err := storage.OpenBadger(dataDir, 10000)
+		if err != nil {
+			log.Fatalf("badger open: %v", err)
+		}
+		log.Printf("using BadgerDB persistence at %s", dataDir)
+		return bs, func() { _ = bs.Close() }
+	default:
+		log.Fatalf("unknown STORE_BACKEND %q", storeBackend)
+		return nil, nil
 	}
 }
 
