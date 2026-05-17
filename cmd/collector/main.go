@@ -38,6 +38,7 @@ func main() {
 	metricsStore := metrics.NewMetricsStore()
 	sseBus := api.NewSSEBus()
 	pipeline := api.NewPipelineWithDefaults(store, metricsStore, sseBus)
+	replicator := api.NewReplicatorFromEnv()
 	authConfig := api.LoadAuthConfig(os.Getenv("API_KEY"))
 	alertManager := api.NewAlertManager(metricsStore, nil)
 	lifecycleHandler := api.NewLifecycleHandler(store, analysis.NewAnalyzer())
@@ -52,7 +53,7 @@ func main() {
 		grpcAddr = a
 	}
 	grpcSrv := grpc.NewServer()
-	coltracev1.RegisterTraceServiceServer(grpcSrv, api.NewOTLPTraceServiceServer(pipeline, authConfig))
+	coltracev1.RegisterTraceServiceServer(grpcSrv, api.NewOTLPTraceServiceServer(pipeline, authConfig, replicator))
 	go func() {
 		lis, err := net.Listen("tcp", grpcAddr)
 		if err != nil {
@@ -66,7 +67,7 @@ func main() {
 	}()
 
 	r := chi.NewRouter()
-	probes := api.SetupRoutes(ctx, r, pipeline, store, metricsStore, sseBus, authConfig, alertManager, lifecycleHandler)
+	probes := api.SetupRoutes(ctx, r, pipeline, store, metricsStore, sseBus, authConfig, alertManager, lifecycleHandler, replicator)
 
 	addr := ":4318"
 	if a := os.Getenv("LISTEN_ADDR"); a != "" {
