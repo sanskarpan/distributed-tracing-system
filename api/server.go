@@ -16,11 +16,15 @@ import (
 )
 
 func SetupRoutes(ctx context.Context, r *chi.Mux, pipeline *Pipeline, store storage.TraceStore,
-	metricsStore *metrics.MetricsStore, sseBus *SSEBus, apiKey string) *ProbeState {
+	metricsStore *metrics.MetricsStore, sseBus *SSEBus, authConfig AuthConfig,
+	alertManager *AlertManager, lifecycle *LifecycleHandler) *ProbeState {
 
 	// Wire pipeline worker pool shutdown to context
 	pipeline.StartWithContext(ctx)
 	probes := NewProbeState(pipeline.QueueDepth, pipeline.QueueCapacity())
+	if alertManager != nil {
+		alertManager.SetProbes(probes)
+	}
 
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Compress(5, "application/json", "text/plain", "text/html"))
@@ -38,74 +42,105 @@ func SetupRoutes(ctx context.Context, r *chi.Mux, pipeline *Pipeline, store stor
 	metricsH := NewMetricsHandler(metricsStore)
 	samplerH := NewSamplerHandler(pipeline)
 
+	if alertManager != nil {
+		alertManager.Start(ctx)
+	}
+
 	// SSE — separate buses per stream type so each endpoint only receives its own events.
 	// sseBus receives span + trace events from the pipeline.
 	metricsBus := NewSSEBus()
 	samplerBus := NewSSEBus()
 
 	r.Group(func(protected chi.Router) {
-		protected.Use(APIKeyAuth(apiKey))
+		protected.Use(AuthMiddleware(authConfig))
 
-		// Collector stats
-		protected.Get("/api/v1/stats", func(w http.ResponseWriter, r *http.Request) {
-			sampled, dropped := pipeline.Stats()
-			storeStats := store.Stats()
-			writeJSON(w, map[string]any{
-				"sampledTotal":     sampled,
-				"droppedTotal":     dropped,
-				"workerQueueDepth": pipeline.QueueDepth(),
-				"traceCount":       storeStats.TraceCount,
-				"maxTraces":        storeStats.MaxSize,
+		protected.Group(func(viewer chi.Router) {
+			viewer.Use(RequireRole(RoleViewer))
+
+			// Query
+			viewer.Get("/api/v1/traces", query.HandleListTraces)
+			viewer.Get("/api/v1/traces/compare", query.HandleCompareTraces)
+			viewer.Get("/api/v1/traces/{traceId}", query.HandleGetTrace)
+			viewer.Get("/api/v1/traces/{traceId}/export", query.HandleExportTrace)
+			viewer.Get("/api/v1/services", query.HandleGetServices)
+			viewer.Get("/api/v1/operations", query.HandleGetOperations)
+			viewer.Get("/api/v1/dependencies", query.HandleGetDependencies)
+
+			// Metrics
+			viewer.Get("/api/v1/metrics/red", metricsH.HandleREDMetrics)
+			viewer.Get("/api/v1/metrics/heatmap", metricsH.HandleHeatmap)
+			viewer.Get("/api/v1/metrics/anomalies", metricsH.HandleAnomalies)
+			viewer.Get("/api/v1/metrics/slo", metricsH.HandleSLOs)
+
+			// Alerts
+			if alertManager != nil {
+				viewer.Get("/api/v1/alerts", alertManager.HandleGetAlerts)
+			}
+
+			// SSE
+			viewer.Get("/sse/spans", func(w http.ResponseWriter, r *http.Request) {
+				sseBus.ServeFilteredSSE(w, r, "span")
 			})
+			viewer.Get("/sse/traces", func(w http.ResponseWriter, r *http.Request) {
+				sseBus.ServeFilteredSSE(w, r, "trace")
+			})
+			viewer.Get("/sse/metrics", metricsBus.ServeSSE)
+			viewer.Get("/sse/sampler", samplerBus.ServeSSE)
 		})
 
-		// Ingest
-		protected.Post("/api/v1/spans", ingest.HandleNativeSpans)
-		protected.Post("/v1/traces", ingest.HandleOTLPTraces)
-		protected.Post("/api/v2/spans", ingest.HandleZipkinSpans) // Zipkin v2 JSON
+		protected.Group(func(operator chi.Router) {
+			operator.Use(RequireRole(RoleOperator))
 
-		// Query
-		protected.Get("/api/v1/traces", query.HandleListTraces)
-		protected.Get("/api/v1/traces/compare", query.HandleCompareTraces)
-		protected.Get("/api/v1/traces/{traceId}", query.HandleGetTrace)
-		protected.Get("/api/v1/traces/{traceId}/export", query.HandleExportTrace)
-		protected.Get("/api/v1/services", query.HandleGetServices)
-		protected.Get("/api/v1/operations", query.HandleGetOperations)
-		protected.Get("/api/v1/dependencies", query.HandleGetDependencies)
+			// Ingest
+			operator.Post("/api/v1/spans", ingest.HandleNativeSpans)
+			operator.Post("/v1/traces", ingest.HandleOTLPTraces)
+			operator.Post("/api/v2/spans", ingest.HandleZipkinSpans) // Zipkin v2 JSON
 
-		// Metrics
-		protected.Get("/api/v1/metrics/red", metricsH.HandleREDMetrics)
-		protected.Get("/api/v1/metrics/heatmap", metricsH.HandleHeatmap)
-		protected.Get("/api/v1/metrics/anomalies", metricsH.HandleAnomalies)
-		protected.Get("/api/v1/metrics/slo", metricsH.HandleSLOs)
-
-		// Sampler
-		protected.Get("/api/v1/sampler", samplerH.HandleGetSampler)
-		protected.Put("/api/v1/sampler", samplerH.HandlePutSampler)
-
-		if os.Getenv("ENABLE_PPROF") == "true" {
-			protected.HandleFunc("/debug/pprof/", pprof.Index)
-			protected.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-			protected.HandleFunc("/debug/pprof/profile", pprof.Profile)
-			protected.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-			protected.HandleFunc("/debug/pprof/trace", pprof.Trace)
-			protected.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
-			protected.Handle("/debug/pprof/block", pprof.Handler("block"))
-			protected.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
-			protected.Handle("/debug/pprof/heap", pprof.Handler("heap"))
-			protected.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
-			protected.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
-		}
-
-		// SSE
-		protected.Get("/sse/spans", func(w http.ResponseWriter, r *http.Request) {
-			sseBus.ServeFilteredSSE(w, r, "span")
+			if lifecycle != nil {
+				operator.Post("/api/v1/traces/import", lifecycle.HandleImportTrace)
+				operator.Delete("/api/v1/traces/{traceId}", lifecycle.HandleDeleteTrace)
+				operator.Post("/api/v1/traces/archive", lifecycle.HandleArchiveSnapshot)
+			}
 		})
-		protected.Get("/sse/traces", func(w http.ResponseWriter, r *http.Request) {
-			sseBus.ServeFilteredSSE(w, r, "trace")
+
+		protected.Group(func(admin chi.Router) {
+			admin.Use(RequireRole(RoleAdmin))
+
+			// Collector stats
+			admin.Get("/api/v1/stats", func(w http.ResponseWriter, r *http.Request) {
+				sampled, dropped := pipeline.Stats()
+				storeStats := store.Stats()
+				writeJSON(w, map[string]any{
+					"sampledTotal":     sampled,
+					"droppedTotal":     dropped,
+					"workerQueueDepth": pipeline.QueueDepth(),
+					"traceCount":       storeStats.TraceCount,
+					"maxTraces":        storeStats.MaxSize,
+				})
+			})
+
+			// Sampler
+			admin.Get("/api/v1/sampler", samplerH.HandleGetSampler)
+			admin.Put("/api/v1/sampler", samplerH.HandlePutSampler)
+
+			if lifecycle != nil {
+				admin.Post("/api/v1/traces/archive/restore", lifecycle.HandleRestoreSnapshot)
+			}
+
+			if os.Getenv("ENABLE_PPROF") == "true" {
+				admin.HandleFunc("/debug/pprof/", pprof.Index)
+				admin.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+				admin.HandleFunc("/debug/pprof/profile", pprof.Profile)
+				admin.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+				admin.HandleFunc("/debug/pprof/trace", pprof.Trace)
+				admin.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
+				admin.Handle("/debug/pprof/block", pprof.Handler("block"))
+				admin.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+				admin.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+				admin.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
+				admin.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+			}
 		})
-		protected.Get("/sse/metrics", metricsBus.ServeSSE)
-		protected.Get("/sse/sampler", samplerBus.ServeSSE)
 	})
 
 	// Broadcast a metrics tick every second so the Metrics page refreshes live.

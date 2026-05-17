@@ -10,6 +10,7 @@ import (
 
 // MetricKey identifies a unique (service, operation) pair.
 type MetricKey struct {
+	TenantID  string
 	Service   string
 	Operation string
 }
@@ -24,6 +25,7 @@ type ServiceMetrics struct {
 
 // MetricSnapshot is a point-in-time snapshot of metrics for a (service, operation) pair.
 type MetricSnapshot struct {
+	TenantID  string  `json:"tenantId,omitempty"`
 	Service   string  `json:"service"`
 	Operation string  `json:"operation"`
 	Rate      float64 `json:"rate"`
@@ -54,7 +56,7 @@ func NewMetricsStore() *MetricsStore {
 
 // Record updates metrics for a span.
 func (m *MetricsStore) Record(span *model.Span) {
-	key := MetricKey{Service: span.ServiceName, Operation: span.Name}
+	key := MetricKey{TenantID: span.TenantID, Service: span.ServiceName, Operation: span.Name}
 
 	m.mu.RLock()
 	sm, ok := m.data[key]
@@ -87,17 +89,18 @@ func (m *MetricsStore) Record(span *model.Span) {
 	sm.Durations.Record(durMs)
 
 	// Record into per-service latency heatmap
-	heat, _ := m.latencyHeat.LoadOrStore(span.ServiceName, &serviceLatencyHeatmap{})
+	heatKey := heatmapKey(span.TenantID, span.ServiceName)
+	heat, _ := m.latencyHeat.LoadOrStore(heatKey, &serviceLatencyHeatmap{})
 	heat.(*serviceLatencyHeatmap).record(durMs)
 }
 
 // HeatmapData returns 10-second aggregated span and error counts for a service over the last 60s.
 // It sums across all operations for the given service (or all services if service == "").
-func (m *MetricsStore) HeatmapData(service string) []HeatmapBucket {
+func (m *MetricsStore) HeatmapData(service, tenantID string) []HeatmapBucket {
 	m.mu.RLock()
 	var matching []*ServiceMetrics
 	for _, sm := range m.data {
-		if service == "" || sm.Key.Service == service {
+		if (tenantID == "" || sm.Key.TenantID == tenantID) && (service == "" || sm.Key.Service == service) {
 			matching = append(matching, sm)
 		}
 	}
@@ -144,11 +147,12 @@ func (m *MetricsStore) HeatmapData(service string) []HeatmapBucket {
 }
 
 // LatencyHeatmap2D returns 2D time × latency bucket data for a service (or all services if "").
-func (m *MetricsStore) LatencyHeatmap2D(service string) LatencyHeatmapData {
+func (m *MetricsStore) LatencyHeatmap2D(service, tenantID string) LatencyHeatmapData {
 	// Collect matching heatmaps
 	var heats []*serviceLatencyHeatmap
 	m.latencyHeat.Range(func(k, v any) bool {
-		if service == "" || k.(string) == service {
+		traceTenant, traceService := parseHeatmapKey(k.(string))
+		if (tenantID == "" || traceTenant == tenantID) && (service == "" || traceService == service) {
 			heats = append(heats, v.(*serviceLatencyHeatmap))
 		}
 		return true
@@ -187,7 +191,7 @@ func (m *MetricsStore) LatencyHeatmap2D(service string) LatencyHeatmapData {
 }
 
 // Snapshot returns current metrics for all (service, operation) keys.
-func (m *MetricsStore) Snapshot() []MetricSnapshot {
+func (m *MetricsStore) Snapshot(tenantID string) []MetricSnapshot {
 	m.mu.RLock()
 	keys := make([]MetricKey, 0, len(m.data))
 	sms := make([]*ServiceMetrics, 0, len(m.data))
@@ -199,6 +203,9 @@ func (m *MetricsStore) Snapshot() []MetricSnapshot {
 
 	snapshots := make([]MetricSnapshot, len(keys))
 	for i, sm := range sms {
+		if tenantID != "" && sm.Key.TenantID != tenantID {
+			continue
+		}
 		rate := sm.Rate.Rate()
 		errRate := sm.Errors.Rate()
 		var errorRate float64
@@ -206,6 +213,7 @@ func (m *MetricsStore) Snapshot() []MetricSnapshot {
 			errorRate = errRate / rate
 		}
 		snapshots[i] = MetricSnapshot{
+			TenantID:  sm.Key.TenantID,
 			Service:   sm.Key.Service,
 			Operation: sm.Key.Operation,
 			Rate:      rate,
@@ -214,6 +222,17 @@ func (m *MetricsStore) Snapshot() []MetricSnapshot {
 			P95Ms:     sm.Durations.P95(),
 			P99Ms:     sm.Durations.P99(),
 		}
+	}
+
+	if tenantID != "" {
+		filtered := make([]MetricSnapshot, 0, len(snapshots))
+		for _, snapshot := range snapshots {
+			if snapshot.Service == "" && snapshot.Operation == "" && snapshot.TenantID == "" {
+				continue
+			}
+			filtered = append(filtered, snapshot)
+		}
+		snapshots = filtered
 	}
 
 	// Sort for deterministic output
@@ -225,4 +244,17 @@ func (m *MetricsStore) Snapshot() []MetricSnapshot {
 	})
 
 	return snapshots
+}
+
+func heatmapKey(tenantID, service string) string {
+	return tenantID + "|" + service
+}
+
+func parseHeatmapKey(key string) (tenantID, service string) {
+	for i := 0; i < len(key); i++ {
+		if key[i] == '|' {
+			return key[:i], key[i+1:]
+		}
+	}
+	return "", key
 }

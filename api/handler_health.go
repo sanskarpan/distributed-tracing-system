@@ -3,8 +3,8 @@ package api
 import (
 	"net/http"
 	"os"
-	"strconv"
 	"runtime"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,6 +36,17 @@ type ProbeState struct {
 	maxQueueUsagePercent float64
 }
 
+type ProbeSnapshot struct {
+	Status         string  `json:"status"`
+	UptimeSec      float64 `json:"uptimeSec"`
+	Goroutines     int     `json:"goroutines"`
+	HeapMB         uint64  `json:"heapMB"`
+	QueueDepth     int     `json:"queueDepth"`
+	QueueCapacity  int     `json:"queueCapacity"`
+	QueueUsagePct  float64 `json:"queueUsagePct"`
+	QueueThreshold float64 `json:"queueThreshold"`
+}
+
 func NewProbeState(queueDepth func() int, queueCapacity int) *ProbeState {
 	return &ProbeState{
 		queueDepth:           queueDepth,
@@ -58,6 +69,14 @@ func (p *ProbeState) HandleHealthz(w http.ResponseWriter, r *http.Request) {
 
 // HandleReadyz is a readiness probe: returns 200 when the collector is ready to serve traffic.
 func (p *ProbeState) HandleReadyz(w http.ResponseWriter, r *http.Request) {
+	snapshot := p.Snapshot()
+	if snapshot.Status == "draining" || snapshot.Status == "overloaded" {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+	writeJSON(w, snapshot)
+}
+
+func (p *ProbeState) Snapshot() ProbeSnapshot {
 	mem := readMemStatsCached()
 	status := "ready"
 	queueDepth := 0
@@ -72,21 +91,19 @@ func (p *ProbeState) HandleReadyz(w http.ResponseWriter, r *http.Request) {
 
 	if p.draining.Load() {
 		status = "draining"
-		w.WriteHeader(http.StatusServiceUnavailable)
 	} else if p.maxQueueUsagePercent > 0 && queueCapacity > 0 && queueUsage >= p.maxQueueUsagePercent {
 		status = "overloaded"
-		w.WriteHeader(http.StatusServiceUnavailable)
 	}
-	writeJSON(w, map[string]any{
-		"status":         status,
-		"uptimeSec":      time.Since(startTime).Seconds(),
-		"goroutines":     runtime.NumGoroutine(),
-		"heapMB":         mem.HeapAlloc / 1024 / 1024,
-		"queueDepth":     queueDepth,
-		"queueCapacity":  queueCapacity,
-		"queueUsagePct":  queueUsage,
-		"queueThreshold": p.maxQueueUsagePercent,
-	})
+	return ProbeSnapshot{
+		Status:         status,
+		UptimeSec:      time.Since(startTime).Seconds(),
+		Goroutines:     runtime.NumGoroutine(),
+		HeapMB:         mem.HeapAlloc / 1024 / 1024,
+		QueueDepth:     queueDepth,
+		QueueCapacity:  queueCapacity,
+		QueueUsagePct:  queueUsage,
+		QueueThreshold: p.maxQueueUsagePercent,
+	}
 }
 
 func envFloat(key string, fallback float64) float64 {

@@ -19,9 +19,11 @@ func (h *IngestHandler) HandleZipkinSpans(w http.ResponseWriter, r *http.Request
 	}
 
 	spans := make([]*model.Span, 0, len(rawSpans))
+	tenantID := EffectiveTenant(PrincipalFromContext(r.Context()))
 	for _, raw := range rawSpans {
 		sp := parseZipkinSpan(raw)
 		if sp != nil {
+			sp.TenantID = tenantID
 			spans = append(spans, sp)
 		}
 	}

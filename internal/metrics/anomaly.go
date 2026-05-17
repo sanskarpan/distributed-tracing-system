@@ -4,19 +4,19 @@ import "math"
 
 // AnomalyResult describes a latency outlier for a (service, operation) pair.
 type AnomalyResult struct {
-	Service    string  `json:"service"`
-	Operation  string  `json:"operation"`
-	P99Ms      float64 `json:"p99Ms"`
-	MeanMs     float64 `json:"meanMs"`
-	StddevMs   float64 `json:"stddevMs"`
-	ZScore     float64 `json:"zScore"`
-	IsOutlier  bool    `json:"isOutlier"`
+	Service   string  `json:"service"`
+	Operation string  `json:"operation"`
+	P99Ms     float64 `json:"p99Ms"`
+	MeanMs    float64 `json:"meanMs"`
+	StddevMs  float64 `json:"stddevMs"`
+	ZScore    float64 `json:"zScore"`
+	IsOutlier bool    `json:"isOutlier"`
 }
 
 // DetectAnomalies scans all operation snapshots and flags those whose P99 latency
 // is more than zThreshold standard deviations above the population mean.
-func (m *MetricsStore) DetectAnomalies(zThreshold float64) []AnomalyResult {
-	snapshots := m.Snapshot()
+func (m *MetricsStore) DetectAnomalies(zThreshold float64, tenantID string) []AnomalyResult {
+	snapshots := m.Snapshot(tenantID)
 	if len(snapshots) == 0 {
 		return nil
 	}

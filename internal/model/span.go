@@ -49,10 +49,11 @@ type Span struct {
 	SpanID       SpanID
 	ParentSpanID SpanID // zero value = root span
 	TraceState   string
+	TenantID     string
 
-	Name        string
-	Kind        SpanKind
-	ServiceName string
+	Name         string
+	Kind         SpanKind
+	ServiceName  string
 	ServiceAttrs map[string]string
 
 	StartTime time.Time

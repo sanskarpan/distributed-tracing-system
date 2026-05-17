@@ -250,7 +250,7 @@ func TestMemoryStore_Services(t *testing.T) {
 		require.NoError(t, store.Upsert(buildTrace(id, svc, "op", 10*time.Millisecond, false, now)))
 	}
 
-	svcs := store.Services()
+	svcs := store.Services("")
 	assert.Equal(t, []string{"svc-a", "svc-b", "svc-c"}, svcs)
 }
 
@@ -263,7 +263,7 @@ func TestMemoryStore_Operations(t *testing.T) {
 		require.NoError(t, store.Upsert(buildTrace(id, "svc", op, 10*time.Millisecond, false, now)))
 	}
 
-	ops := store.Operations("svc")
+	ops := store.Operations("svc", "")
 	assert.Equal(t, []string{"op-1", "op-2", "op-3"}, ops)
 }
 

@@ -4,7 +4,7 @@ package model
 type ValueType int
 
 const (
-	ValueString      ValueType = iota
+	ValueString ValueType = iota
 	ValueInt
 	ValueFloat
 	ValueBool

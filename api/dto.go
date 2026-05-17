@@ -65,6 +65,7 @@ type SpanDetailDTO struct {
 	SpanID            string         `json:"spanId"`
 	ParentSpanID      string         `json:"parentSpanId"`
 	TraceID           string         `json:"traceId"`
+	TenantID          string         `json:"tenantId,omitempty"`
 	Name              string         `json:"name"`
 	ServiceName       string         `json:"serviceName"`
 	Kind              int            `json:"kind"`
@@ -87,6 +88,7 @@ type SpanEventDTO struct {
 // TraceDetailDTO is the response format for a full trace.
 type TraceDetailDTO struct {
 	TraceID        string             `json:"traceId"`
+	TenantID       string             `json:"tenantId,omitempty"`
 	Spans          []SpanDetailDTO    `json:"spans"`
 	CriticalPath   []string           `json:"criticalPath"` // SpanIDs
 	Services       []string           `json:"services"`
@@ -112,6 +114,7 @@ type SpanGapDTO struct {
 // TraceSummaryDTO is the compact representation for list views.
 type TraceSummaryDTO struct {
 	TraceID     string    `json:"traceId"`
+	TenantID    string    `json:"tenantId,omitempty"`
 	RootService string    `json:"rootService"`
 	RootOp      string    `json:"rootOp"`
 	DurationMs  float64   `json:"durationMs"`
@@ -228,6 +231,7 @@ func spanToDetailDTO(sp *model.Span, traceStartNano uint64) SpanDetailDTO {
 		SpanID:            sp.SpanID.String(),
 		ParentSpanID:      parentSpanID,
 		TraceID:           sp.TraceID.String(),
+		TenantID:          sp.TenantID,
 		Name:              sp.Name,
 		ServiceName:       sp.ServiceName,
 		Kind:              int(sp.Kind),

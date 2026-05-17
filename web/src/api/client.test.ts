@@ -1,9 +1,12 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api } from './client'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const originalFetch = globalThis.fetch
 
 describe('api client', () => {
+  beforeEach(async () => {
+    vi.resetModules()
+  })
+
   afterEach(() => {
     globalThis.fetch = originalFetch
     vi.useRealTimers()
@@ -11,6 +14,7 @@ describe('api client', () => {
   })
 
   it('surfaces structured JSON error messages from the backend', async () => {
+    const { api } = await import('./client')
     globalThis.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ error: 'query failed' }), {
         status: 500,
@@ -23,6 +27,7 @@ describe('api client', () => {
   })
 
   it('returns readyz payloads even when the collector is overloaded', async () => {
+    const { api } = await import('./client')
     globalThis.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         status: 'overloaded',
@@ -48,6 +53,7 @@ describe('api client', () => {
   })
 
   it('times out requests that never resolve', async () => {
+    const { api } = await import('./client')
     vi.useFakeTimers()
     globalThis.fetch = vi.fn((_input, init) => {
       const signal = init?.signal as AbortSignal | undefined
@@ -63,5 +69,25 @@ describe('api client', () => {
     await vi.advanceTimersByTimeAsync(5)
 
     await assertion
+  })
+
+  it('adds configured auth and tenant headers to JSON requests', async () => {
+    vi.stubEnv('VITE_API_TOKEN', 'viewer-token')
+    vi.stubEnv('VITE_TENANT_ID', 'tenant-a')
+    const { api } = await import('./client')
+
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ services: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    await api.getServices()
+
+    const [, init] = vi.mocked(globalThis.fetch).mock.calls[0]
+    const headers = new Headers(init?.headers)
+    expect(headers.get('Authorization')).toBe('Bearer viewer-token')
+    expect(headers.get('X-Tenant-ID')).toBe('tenant-a')
   })
 })

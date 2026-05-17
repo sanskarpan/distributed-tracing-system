@@ -49,7 +49,7 @@ func (c *prometheusCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (c *prometheusCollector) Collect(ch chan<- prometheus.Metric) {
-	for _, s := range c.metricsStore.Snapshot() {
+	for _, s := range c.metricsStore.Snapshot("") {
 		svc, op := s.Service, s.Operation
 		ch <- prometheus.MustNewConstMetric(c.requestRate, prometheus.GaugeValue, s.Rate, svc, op)
 		ch <- prometheus.MustNewConstMetric(c.errorRate, prometheus.GaugeValue, s.ErrorRate, svc, op)

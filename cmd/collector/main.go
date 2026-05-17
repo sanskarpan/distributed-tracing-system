@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yourname/tracing/api"
+	"github.com/yourname/tracing/internal/analysis"
 	"github.com/yourname/tracing/internal/metrics"
 	"github.com/yourname/tracing/internal/storage"
 )
@@ -28,8 +29,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// If DATA_DIR is set, use BadgerDB for durable on-disk persistence.
-	// Otherwise, fall back to the in-memory store.
 	var store storage.TraceStore
 	if dataDir := os.Getenv("DATA_DIR"); dataDir != "" {
 		bs, err := storage.OpenBadger(dataDir, 10000)
@@ -41,7 +40,6 @@ func main() {
 		log.Printf("using BadgerDB persistence at %s", dataDir)
 	} else {
 		mem := storage.NewMemoryStore(10000)
-		// Optionally evict traces older than TRACE_TTL (e.g. "1h", "30m").
 		if ttlStr := os.Getenv("TRACE_TTL"); ttlStr != "" {
 			if ttl, err := time.ParseDuration(ttlStr); err == nil && ttl > 0 {
 				mem.StartRetention(ctx, ttl, ttl/10)
@@ -56,10 +54,12 @@ func main() {
 	metricsStore := metrics.NewMetricsStore()
 	sseBus := api.NewSSEBus()
 	pipeline := api.NewPipelineWithDefaults(store, metricsStore, sseBus)
+	authConfig := api.LoadAuthConfig(os.Getenv("API_KEY"))
+	alertManager := api.NewAlertManager(metricsStore, nil)
+	lifecycleHandler := api.NewLifecycleHandler(store, analysis.NewAnalyzer())
 
-	apiKey := os.Getenv("API_KEY")
-	if apiKey != "" {
-		log.Printf("API key authentication enabled")
+	if authConfig.Enabled {
+		log.Printf("token authentication enabled with %d configured principal(s)", len(authConfig.Tokens))
 	}
 
 	// Start gRPC OTLP receiver (port 4317)
@@ -68,7 +68,7 @@ func main() {
 		grpcAddr = a
 	}
 	grpcSrv := grpc.NewServer()
-	coltracev1.RegisterTraceServiceServer(grpcSrv, api.NewOTLPTraceServiceServer(pipeline))
+	coltracev1.RegisterTraceServiceServer(grpcSrv, api.NewOTLPTraceServiceServer(pipeline, authConfig))
 	go func() {
 		lis, err := net.Listen("tcp", grpcAddr)
 		if err != nil {
@@ -82,7 +82,7 @@ func main() {
 	}()
 
 	r := chi.NewRouter()
-	probes := api.SetupRoutes(ctx, r, pipeline, store, metricsStore, sseBus, apiKey)
+	probes := api.SetupRoutes(ctx, r, pipeline, store, metricsStore, sseBus, authConfig, alertManager, lifecycleHandler)
 
 	addr := ":4318"
 	if a := os.Getenv("LISTEN_ADDR"); a != "" {

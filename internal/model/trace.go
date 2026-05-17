@@ -5,6 +5,7 @@ import "time"
 // Trace is the assembled set of spans sharing a TraceID.
 type Trace struct {
 	TraceID  TraceID
+	TenantID string
 	Spans    []*Span // all spans, including orphans
 	RootSpan *Span
 

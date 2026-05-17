@@ -155,6 +155,26 @@ func (s *MemoryStore) Get(id model.TraceID) (*model.Trace, bool) {
 	return tr, ok
 }
 
+// Delete removes a trace and all associated indexes.
+func (s *MemoryStore) Delete(id model.TraceID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	trace, ok := s.traces[id]
+	if !ok {
+		return nil
+	}
+	s.removeFromIndexes(trace)
+	delete(s.traces, id)
+	for i, e := range s.timeline {
+		if e.id == id {
+			s.timeline = append(s.timeline[:i], s.timeline[i+1:]...)
+			break
+		}
+	}
+	return nil
+}
+
 // Query returns traces matching the given query parameters.
 func (s *MemoryStore) Query(q *TraceQuery) (*TraceQueryResult, error) {
 	s.mu.RLock()
@@ -166,6 +186,9 @@ func (s *MemoryStore) Query(q *TraceQuery) (*TraceQueryResult, error) {
 	// If TraceID is specified, short-circuit
 	if q.TraceID != nil {
 		if tr, ok := s.traces[*q.TraceID]; ok {
+			if q.TenantID != "" && tr.TenantID != q.TenantID {
+				return &TraceQueryResult{Traces: []*TraceSummary{}, Total: 0, HasMore: false}, nil
+			}
 			summary := s.toSummary(tr)
 			return &TraceQueryResult{
 				Traces:  []*TraceSummary{summary},
@@ -228,6 +251,9 @@ func (s *MemoryStore) Query(q *TraceQuery) (*TraceQueryResult, error) {
 	for id := range candidates {
 		tr, ok := s.traces[id]
 		if !ok {
+			continue
+		}
+		if q.TenantID != "" && tr.TenantID != q.TenantID {
 			continue
 		}
 
@@ -309,12 +335,40 @@ func (s *MemoryStore) Query(q *TraceQuery) (*TraceQueryResult, error) {
 	}, nil
 }
 
-// Services returns a sorted list of all known service names.
-func (s *MemoryStore) Services() []string {
+// List returns fully materialized traces matching the given query.
+func (s *MemoryStore) List(q *TraceQuery) ([]*model.Trace, error) {
+	result, err := s.Query(q)
+	if err != nil {
+		return nil, err
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	svcs := make([]string, 0, len(s.byService))
-	for svc := range s.byService {
+
+	traces := make([]*model.Trace, 0, len(result.Traces))
+	for _, summary := range result.Traces {
+		if trace, ok := s.traces[summary.TraceID]; ok {
+			traces = append(traces, trace)
+		}
+	}
+	return traces, nil
+}
+
+// Services returns a sorted list of all known service names.
+func (s *MemoryStore) Services(tenantID string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	seen := make(map[string]struct{})
+	for _, trace := range s.traces {
+		if tenantID != "" && trace.TenantID != tenantID {
+			continue
+		}
+		for _, svc := range trace.Services {
+			seen[svc] = struct{}{}
+		}
+	}
+	svcs := make([]string, 0, len(seen))
+	for svc := range seen {
 		svcs = append(svcs, svc)
 	}
 	sort.Strings(svcs)
@@ -322,21 +376,19 @@ func (s *MemoryStore) Services() []string {
 }
 
 // Operations returns a sorted list of all known operation names for a given service.
-func (s *MemoryStore) Operations(service string) []string {
+func (s *MemoryStore) Operations(service, tenantID string) []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	prefix := service + ":"
 	seen := make(map[string]struct{})
-	for key, m := range s.byOperation {
-		if len(m) == 0 {
+	for _, trace := range s.traces {
+		if tenantID != "" && trace.TenantID != tenantID {
 			continue
 		}
-		if service == "" {
-			op := operationFromKey(key)
-			seen[op] = struct{}{}
-		} else if len(key) > len(prefix) && key[:len(prefix)] == prefix {
-			op := key[len(prefix):]
-			seen[op] = struct{}{}
+		for _, span := range trace.Spans {
+			if service != "" && span.ServiceName != service {
+				continue
+			}
+			seen[span.Name] = struct{}{}
 		}
 	}
 	ops := make([]string, 0, len(seen))
@@ -391,6 +443,7 @@ func (s *MemoryStore) Stats() StoreStats {
 // toSummary builds a TraceSummary from a Trace (must be called under read lock).
 func (s *MemoryStore) toSummary(tr *model.Trace) *TraceSummary {
 	sum := &TraceSummary{
+		TenantID:   tr.TenantID,
 		TraceID:    tr.TraceID,
 		Duration:   tr.Duration,
 		SpanCount:  tr.SpanCount,

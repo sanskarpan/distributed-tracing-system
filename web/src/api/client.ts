@@ -13,6 +13,8 @@ import type {
 
 const BASE = ''  // proxied by Vite
 const DEFAULT_TIMEOUT_MS = 15000
+const API_TOKEN = import.meta.env.VITE_API_TOKEN?.trim() ?? ''
+const TENANT_ID = import.meta.env.VITE_TENANT_ID?.trim() ?? ''
 
 type APIRequestOptions = RequestInit & {
   timeoutMs?: number
@@ -78,6 +80,14 @@ async function fetchJSON<T>(url: string, options?: FetchJSONOptions): Promise<T>
   const allowedStatuses = options?.allowedStatuses ?? []
   const callerSignal = options?.signal
   const requestOptions: RequestInit = { ...(options ?? {}) }
+  const headers = new Headers(options?.headers ?? {})
+  if (API_TOKEN && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${API_TOKEN}`)
+  }
+  if (TENANT_ID && !headers.has('X-Tenant-ID')) {
+    headers.set('X-Tenant-ID', TENANT_ID)
+  }
+  requestOptions.headers = headers
   delete (requestOptions as FetchJSONOptions).timeoutMs
   delete (requestOptions as FetchJSONOptions).allowedStatuses
   delete (requestOptions as FetchJSONOptions).signal
@@ -97,6 +107,17 @@ async function fetchJSON<T>(url: string, options?: FetchJSONOptions): Promise<T>
   } finally {
     cleanup()
   }
+}
+
+export function buildSSEURL(path: string): string {
+  const url = new URL(`${BASE}${path}`, globalThis.location?.origin ?? 'http://localhost')
+  if (API_TOKEN && !url.searchParams.has('apiKey')) {
+    url.searchParams.set('apiKey', API_TOKEN)
+  }
+  if (TENANT_ID && !url.searchParams.has('tenantId')) {
+    url.searchParams.set('tenantId', TENANT_ID)
+  }
+  return `${url.pathname}${url.search}`
 }
 
 export const api = {

@@ -2,22 +2,22 @@ package metrics
 
 // SLOResult holds the error budget status for a service.
 type SLOResult struct {
-	Service          string  `json:"service"`
+	Service string `json:"service"`
 	// TargetErrorRate is the maximum acceptable error ratio (e.g. 0.01 = 1%)
-	TargetErrorRate  float64 `json:"targetErrorRate"`
+	TargetErrorRate float64 `json:"targetErrorRate"`
 	// CurrentErrorRate is the actual error ratio in the current window
 	CurrentErrorRate float64 `json:"currentErrorRate"`
 	// BudgetRemaining is the fraction of error budget still available (0–1)
-	BudgetRemaining  float64 `json:"budgetRemaining"`
+	BudgetRemaining float64 `json:"budgetRemaining"`
 	// Breached is true when the current error rate exceeds the SLO target
-	Breached         bool    `json:"breached"`
+	Breached bool `json:"breached"`
 }
 
 // ComputeSLOs aggregates error rates per service and computes error budget
 // against the given target error rate. targetErrorRate is applied globally
 // across all services (e.g. 0.01 = 99% availability SLO).
-func (m *MetricsStore) ComputeSLOs(targetErrorRate float64) []SLOResult {
-	snapshots := m.Snapshot()
+func (m *MetricsStore) ComputeSLOs(targetErrorRate float64, tenantID string) []SLOResult {
+	snapshots := m.Snapshot(tenantID)
 
 	// Aggregate per service: weighted sum of requests and errors
 	type svcStats struct {
@@ -54,11 +54,11 @@ func (m *MetricsStore) ComputeSLOs(targetErrorRate float64) []SLOResult {
 		}
 
 		results = append(results, SLOResult{
-			Service:         svc,
-			TargetErrorRate: targetErrorRate,
+			Service:          svc,
+			TargetErrorRate:  targetErrorRate,
 			CurrentErrorRate: currentErrRate,
-			BudgetRemaining: budgetRemaining,
-			Breached:        currentErrRate > targetErrorRate,
+			BudgetRemaining:  budgetRemaining,
+			Breached:         currentErrRate > targetErrorRate,
 		})
 	}
 	return results

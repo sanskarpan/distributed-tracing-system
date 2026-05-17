@@ -94,6 +94,7 @@ func (a *Assembler) buildTree(spans []*model.Span) *model.Trace {
 	}
 
 	trace.TraceID = spans[0].TraceID
+	trace.TenantID = spans[0].TenantID
 
 	// Build spanMap by SpanID
 	spanMap := make(map[model.SpanID]*model.Span, len(spans))

@@ -8,6 +8,7 @@ import (
 
 // TraceQuery specifies filter, sort, and pagination parameters for trace queries.
 type TraceQuery struct {
+	TenantID      string
 	ServiceName   string
 	OperationName string
 	Tags          map[string]string
@@ -33,6 +34,7 @@ type TraceQueryResult struct {
 
 // TraceSummary is a lightweight representation of a trace for listing/search results.
 type TraceSummary struct {
+	TenantID    string
 	TraceID     model.TraceID
 	RootService string
 	RootOp      string
@@ -54,7 +56,9 @@ type TraceStore interface {
 	Upsert(trace *model.Trace) error
 	Get(id model.TraceID) (*model.Trace, bool)
 	Query(q *TraceQuery) (*TraceQueryResult, error)
-	Services() []string
-	Operations(service string) []string
+	List(q *TraceQuery) ([]*model.Trace, error)
+	Delete(id model.TraceID) error
+	Services(tenantID string) []string
+	Operations(service, tenantID string) []string
 	Stats() StoreStats
 }
