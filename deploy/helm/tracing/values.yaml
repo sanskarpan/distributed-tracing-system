@@ -9,10 +9,13 @@ collector:
     port: 4318
   grpcPort: 4317
   env:
+    storeBackend: badger
     dataDir: /var/lib/tracing
     readinessMaxQueueUsagePct: "80"
     enablePprof: "false"
     authTokens: ""
+    replicaPeers: ""
+    replicaApiToken: ""
     alertWebhookUrl: ""
     archiveDir: /var/lib/tracing/archive
   persistence:
