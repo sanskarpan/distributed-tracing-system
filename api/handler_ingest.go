@@ -11,11 +11,16 @@ import (
 )
 
 type IngestHandler struct {
-	pipeline *Pipeline
+	pipeline   *Pipeline
+	replicator *Replicator
 }
 
 func NewIngestHandler(pipeline *Pipeline) *IngestHandler {
 	return &IngestHandler{pipeline: pipeline}
+}
+
+func (h *IngestHandler) SetReplicator(replicator *Replicator) {
+	h.replicator = replicator
 }
 
 // HandleNativeSpans handles POST /api/v1/spans
@@ -41,6 +46,9 @@ func (h *IngestHandler) HandleNativeSpans(w http.ResponseWriter, r *http.Request
 	}
 
 	accepted, dropped, _ := h.pipeline.IngestSpans(spans)
+	if h.replicator != nil && r.Header.Get(replicationHeader) == "" {
+		h.replicator.ReplicateAsync(spans, tenantID)
+	}
 	dropped += parseDropped
 
 	w.Header().Set("Content-Type", "application/json")
@@ -68,6 +76,9 @@ func (h *IngestHandler) HandleOTLPTraces(w http.ResponseWriter, r *http.Request)
 	}
 
 	h.pipeline.IngestSpans(spans)
+	if h.replicator != nil && r.Header.Get(replicationHeader) == "" {
+		h.replicator.ReplicateAsync(spans, tenantID)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte("{}"))

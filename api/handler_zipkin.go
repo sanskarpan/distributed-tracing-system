@@ -29,6 +29,9 @@ func (h *IngestHandler) HandleZipkinSpans(w http.ResponseWriter, r *http.Request
 	}
 
 	h.pipeline.IngestSpans(spans)
+	if h.replicator != nil && r.Header.Get(replicationHeader) == "" {
+		h.replicator.ReplicateAsync(spans, tenantID)
+	}
 	w.WriteHeader(http.StatusAccepted)
 }
 
