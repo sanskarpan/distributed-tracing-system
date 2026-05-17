@@ -6,6 +6,8 @@ This directory contains production-oriented examples that complement the local `
 
 - `k8s/`
   Kubernetes manifests for a basic collector + web deployment.
+- `helm/`
+  Packaged Helm chart for Kubernetes installation and release artifacts.
 - `observability/`
   Prometheus scrape configuration and a starter Grafana dashboard.
 

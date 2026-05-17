@@ -1,0 +1,23 @@
+version: 2
+
+project_name: tracing
+
+builds:
+  - id: collector
+    main: ./cmd/collector
+    binary: collector
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt

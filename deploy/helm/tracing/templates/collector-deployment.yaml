@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tracing.fullname" . }}-collector
+spec:
+  replicas: {{ .Values.collector.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "tracing.name" . }}
+      app.kubernetes.io/component: collector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "tracing.name" . }}
+        app.kubernetes.io/component: collector
+    spec:
+      containers:
+        - name: collector
+          image: "{{ .Values.collector.image.repository }}:{{ .Values.collector.image.tag }}"
+          imagePullPolicy: {{ .Values.collector.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.collector.service.port }}
+            - name: grpc
+              containerPort: {{ .Values.collector.grpcPort }}
+          env:
+            - name: DATA_DIR
+              value: {{ .Values.collector.env.dataDir | quote }}
+            - name: READINESS_MAX_QUEUE_USAGE_PCT
+              value: {{ .Values.collector.env.readinessMaxQueueUsagePct | quote }}
+            - name: ENABLE_PPROF
+              value: {{ .Values.collector.env.enablePprof | quote }}
+            - name: AUTH_TOKENS
+              value: {{ .Values.collector.env.authTokens | quote }}
+            - name: ALERT_WEBHOOK_URL
+              value: {{ .Values.collector.env.alertWebhookUrl | quote }}
+            - name: ARCHIVE_DIR
+              value: {{ .Values.collector.env.archiveDir | quote }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          volumeMounts:
+            - name: collector-data
+              mountPath: {{ .Values.collector.env.dataDir }}
+      volumes:
+        - name: collector-data
+{{- if .Values.collector.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "tracing.fullname" . }}-collector
+{{- else }}
+          emptyDir: {}
+{{- end }}

@@ -1,0 +1,12 @@
+{{- if .Values.collector.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "tracing.fullname" . }}-collector
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.collector.persistence.size }}
+{{- end }}

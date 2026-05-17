@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tracing.fullname" . }}-collector
+spec:
+  type: {{ .Values.collector.service.type }}
+  selector:
+    app.kubernetes.io/name: {{ include "tracing.name" . }}
+    app.kubernetes.io/component: collector
+  ports:
+    - name: http
+      port: {{ .Values.collector.service.port }}
+      targetPort: http
+    - name: grpc
+      port: {{ .Values.collector.grpcPort }}
+      targetPort: grpc

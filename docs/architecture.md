@@ -7,7 +7,7 @@ The system is a single-process tracing collector with a browser-based analysis U
 1. Clients send spans through OTLP/HTTP, native JSON, or Zipkin JSON.
 2. The collector validates spans, applies sampling, enriches metadata, records metrics, and assembles traces.
 3. Completed traces are stored in memory or in Badger-backed durable storage.
-4. Query APIs expose traces, metrics, dependency graphs, and sampler state.
+4. Query APIs expose traces, metrics, alerts, dependency graphs, lifecycle operations, and sampler state.
 5. The frontend consumes APIs directly and uses SSE for live updates.
 
 ## Runtime Topology
@@ -28,10 +28,10 @@ apps / demo traffic
            `- assembler
                 |
                 v
-        analysis + storage
+        analysis + storage + lifecycle
                 |
                 v
-         query / metrics APIs
+   query / metrics / alerts / lifecycle APIs
                 |
                 v
             React frontend
@@ -50,6 +50,12 @@ apps / demo traffic
 
 - `api/server.go`
   Route composition, public vs protected endpoints, live SSE feeds, and periodic sampler/metrics broadcast ticks.
+- `api/auth.go`
+  Static token parsing, principal context propagation, RBAC, and tenant scoping.
+- `api/alerts.go`
+  Alert evaluation and webhook delivery.
+- `api/lifecycle.go`
+  Import, delete, archive, and restore handlers.
 - `api/handler_*.go`
   Endpoint-level request parsing and response shaping.
 - `api/pipeline.go`
@@ -89,6 +95,8 @@ The collector now keeps head-sampling decisions trace-consistent in the pipeline
 - `internal/storage/badger.go`
   Durable write-through store backed by Badger while preserving in-memory query behavior.
 
+The store layer is now tenant-aware and supports destructive lifecycle operations required for archive/delete flows.
+
 ## Frontend Layers
 
 ### Routing
@@ -101,7 +109,7 @@ The collector now keeps head-sampling decisions trace-consistent in the pipeline
 ### Data Access
 
 - `web/src/api/client.ts`
-  Fetch wrapper around backend APIs.
+  Fetch wrapper around backend APIs, including optional auth and tenant headers for protected deployments.
 - `web/src/hooks/useSearch.ts`
   Search query orchestration, cancellation, pagination merge, and filter state.
 - `web/src/hooks/useSSE.ts`
@@ -151,6 +159,6 @@ The collector now keeps head-sampling decisions trace-consistent in the pipeline
 
 ## Known Tradeoffs
 
-- Storage is not horizontally distributed.
+- Storage is still single-collector scoped unless you layer external replication around it.
 - Live frontend state is still page-centric, not globally normalized.
 - Some visualization pages remain rich-client heavy despite route-level code splitting.

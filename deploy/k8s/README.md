@@ -17,3 +17,5 @@ Before applying:
 1. Replace the placeholder image names with your published collector and web images.
 2. Adjust hostnames in `ingress.yaml`.
 3. If you want durable trace storage, swap the collector `emptyDir` mount for a PVC and set `DATA_DIR`.
+
+If you want a packaged install path rather than raw manifests, use the Helm chart in [`deploy/helm/tracing`](../helm/tracing).

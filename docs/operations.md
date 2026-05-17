@@ -10,6 +10,8 @@
   gRPC OTLP listen address. Default `:4317`.
 - `API_KEY`
   Enables bearer-token protection for protected endpoints.
+- `AUTH_TOKENS`
+  Static token map in `token|role|tenant;...` form. Enables RBAC and tenant isolation for HTTP and gRPC OTLP ingest.
 - `HTTP_READ_HEADER_TIMEOUT`
   HTTP request header timeout. Default `5s`.
 - `HTTP_READ_TIMEOUT`
@@ -31,6 +33,8 @@
   Enables Badger-backed durable storage.
 - `TRACE_TTL`
   Enables retention eviction for the in-memory store.
+- `ARCHIVE_DIR`
+  Filesystem location for lifecycle archive snapshots.
 
 ### TLS
 
@@ -41,12 +45,16 @@
 
 - `LOG_LINK_TEMPLATE`
   Used by the frontend when constructing external log links.
+- `VITE_API_TOKEN`
+  Frontend bearer token for protected API deployments.
+- `VITE_TENANT_ID`
+  Frontend tenant scope for protected multi-tenant deployments.
 
 ## Deployment Notes
 
 ### Collector
 
-The collector is intended to run as a single service process.
+The collector still runs as a single service process, but it now supports:
 
 Operational characteristics:
 
@@ -54,6 +62,7 @@ Operational characteristics:
 - optional durable persistence with Badger
 - HTTP and gRPC receivers in the same process
 - graceful shutdown now drains HTTP requests, sampler buffers, worker queues, and pending assembler traces
+- tenant-aware ingest, query, alerting, and trace lifecycle operations
 
 ### Frontend
 
@@ -74,6 +83,7 @@ The frontend is a static build served separately in development through Vite. In
 - `/metrics`
 - `/api/v1/stats`
 - `/api/v1/sampler`
+- `/api/v1/alerts`
 - `/debug/pprof/*` when `ENABLE_PPROF=true`
 - frontend live metrics and sampler pages
 
@@ -85,6 +95,7 @@ The frontend is a static build served separately in development through Vite. In
 - trace count/max trace count
 - service-level rate/error/latency
 - anomalous latency spikes
+- alert webhook delivery behavior
 
 ## Failure Modes to Watch
 
