@@ -27,7 +27,9 @@ func newFuzzServer() (srv *httptest.Server, cancel context.CancelFunc) {
 	pipeline := api.NewPipeline(store, ms, bus, s, analyzer, 20*time.Millisecond)
 	r := chi.NewRouter()
 	ctx, cancel := context.WithCancel(context.Background())
-	api.SetupRoutes(ctx, r, pipeline, store, ms, bus, "")
+	alertManager := api.NewAlertManager(ms, nil)
+	lifecycleHandler := api.NewLifecycleHandler(store, analysis.NewAnalyzer())
+	api.SetupRoutes(ctx, r, pipeline, store, ms, bus, api.LoadAuthConfig(""), alertManager, lifecycleHandler)
 	return httptest.NewServer(r), cancel
 }
 

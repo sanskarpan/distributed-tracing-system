@@ -32,7 +32,7 @@ func TestMetricsStore_RecordAndSnapshot(t *testing.T) {
 		store.Record(makeSpan("svc-a", "op-1", 10*time.Millisecond, false))
 	}
 
-	snapshots := store.Snapshot()
+	snapshots := store.Snapshot("")
 	assert.Len(t, snapshots, 1)
 	snap := snapshots[0]
 	assert.Equal(t, "svc-a", snap.Service)
@@ -50,7 +50,7 @@ func TestMetricsStore_P99KnownDistribution(t *testing.T) {
 		store.Record(makeSpan("svc", "op", time.Duration(i)*time.Millisecond, false))
 	}
 
-	snaps := store.Snapshot()
+	snaps := store.Snapshot("")
 	assert.Len(t, snaps, 1)
 	p99 := snaps[0].P99Ms
 	// P99 of [1..100] should be approximately 99ms ± 2ms
@@ -72,7 +72,7 @@ func TestMetricsStore_ConcurrentRecord(t *testing.T) {
 	}
 	wg.Wait()
 
-	snaps := store.Snapshot()
+	snaps := store.Snapshot("")
 	assert.Len(t, snaps, 1)
 	// Rate > 0 means spans were recorded
 	assert.Greater(t, snaps[0].Rate, 0.0)
@@ -85,7 +85,7 @@ func TestMetricsStore_MultipleKeys(t *testing.T) {
 	store.Record(makeSpan("svc-a", "op-2", 20*time.Millisecond, true))
 	store.Record(makeSpan("svc-b", "op-1", 30*time.Millisecond, false))
 
-	snaps := store.Snapshot()
+	snaps := store.Snapshot("")
 	assert.Len(t, snaps, 3)
 
 	// Find the error one

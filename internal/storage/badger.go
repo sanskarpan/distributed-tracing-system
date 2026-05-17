@@ -58,6 +58,16 @@ func (bs *BadgerStore) Upsert(trace *model.Trace) error {
 	return bs.persist(trace)
 }
 
+// Delete removes a trace from the in-memory indexes and BadgerDB.
+func (bs *BadgerStore) Delete(id model.TraceID) error {
+	if err := bs.MemoryStore.Delete(id); err != nil {
+		return err
+	}
+	return bs.db.Update(func(txn *badger.Txn) error {
+		return txn.Delete(traceKey(id))
+	})
+}
+
 // persist serialises a single trace into BadgerDB.
 func (bs *BadgerStore) persist(trace *model.Trace) error {
 	data, err := json.Marshal(trace)

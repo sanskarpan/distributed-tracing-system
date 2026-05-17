@@ -33,6 +33,7 @@ func (h *QueryHandler) HandleListTraces(w http.ResponseWriter, r *http.Request) 
 	for _, ts := range result.Traces {
 		summaries = append(summaries, TraceSummaryDTO{
 			TraceID:     ts.TraceID.String(),
+			TenantID:    ts.TenantID,
 			RootService: ts.RootService,
 			RootOp:      ts.RootOp,
 			DurationMs:  float64(ts.Duration.Nanoseconds()) / 1e6,
@@ -64,36 +65,38 @@ func (h *QueryHandler) HandleGetTrace(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"trace not found"}`, 404)
 		return
 	}
+	if !principalCanAccessTenant(PrincipalFromContext(r.Context()), trace.TenantID) {
+		http.Error(w, `{"error":"trace not found"}`, http.StatusNotFound)
+		return
+	}
 
 	writeJSON(w, traceToDetailDTO(trace))
 }
 
 // HandleGetServices handles GET /api/v1/services
 func (h *QueryHandler) HandleGetServices(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]any{"services": h.store.Services()})
+	writeJSON(w, map[string]any{"services": h.store.Services(EffectiveTenant(PrincipalFromContext(r.Context())))})
 }
 
 // HandleGetOperations handles GET /api/v1/operations?service=X
 func (h *QueryHandler) HandleGetOperations(w http.ResponseWriter, r *http.Request) {
 	service := r.URL.Query().Get("service")
-	writeJSON(w, map[string]any{"operations": h.store.Operations(service)})
+	writeJSON(w, map[string]any{"operations": h.store.Operations(service, EffectiveTenant(PrincipalFromContext(r.Context())))})
 }
 
 // HandleGetDependencies handles GET /api/v1/dependencies
 func (h *QueryHandler) HandleGetDependencies(w http.ResponseWriter, r *http.Request) {
 	// Get all recent traces
-	q := &storage.TraceQuery{Limit: 1000, SortBy: "receivedAt", SortDesc: true}
-	result, err := h.store.Query(q)
+	q := &storage.TraceQuery{
+		TenantID: EffectiveTenant(PrincipalFromContext(r.Context())),
+		Limit:    1000,
+		SortBy:   "receivedAt",
+		SortDesc: true,
+	}
+	traces, err := h.store.List(q)
 	if err != nil {
 		http.Error(w, `{"error":"query failed"}`, 500)
 		return
-	}
-
-	traces := make([]*model.Trace, 0, len(result.Traces))
-	for _, ts := range result.Traces {
-		if t, ok := h.store.Get(ts.TraceID); ok {
-			traces = append(traces, t)
-		}
 	}
 
 	graph := h.pipeline.analyzer.BuildDependencyGraph(traces, time.Now().Add(-1*time.Hour))
@@ -119,6 +122,10 @@ func (h *QueryHandler) HandleExportTrace(w http.ResponseWriter, r *http.Request)
 		http.Error(w, `{"error":"trace not found"}`, 404)
 		return
 	}
+	if !principalCanAccessTenant(PrincipalFromContext(r.Context()), trace.TenantID) {
+		http.Error(w, `{"error":"trace not found"}`, http.StatusNotFound)
+		return
+	}
 
 	filename := "trace-" + traceIDStr + ".json"
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
@@ -141,6 +148,11 @@ func (h *QueryHandler) HandleCompareTraces(w http.ResponseWriter, r *http.Reques
 	compare, ok2 := h.store.Get(compareID)
 	if !ok1 || !ok2 {
 		http.Error(w, `{"error":"trace not found"}`, 404)
+		return
+	}
+	principal := PrincipalFromContext(r.Context())
+	if !principalCanAccessTenant(principal, base.TenantID) || !principalCanAccessTenant(principal, compare.TenantID) {
+		http.Error(w, `{"error":"trace not found"}`, http.StatusNotFound)
 		return
 	}
 
@@ -176,7 +188,9 @@ func (h *QueryHandler) HandleCompareTraces(w http.ResponseWriter, r *http.Reques
 }
 
 func buildTraceQuery(r *http.Request) *storage.TraceQuery {
+	principal := PrincipalFromContext(r.Context())
 	q := &storage.TraceQuery{
+		TenantID:      EffectiveTenant(principal),
 		ServiceName:   r.URL.Query().Get("service"),
 		OperationName: r.URL.Query().Get("operation"),
 		AttributeKV:   r.URL.Query().Get("attr"),
@@ -276,6 +290,7 @@ func traceToDetailDTO(trace *model.Trace) TraceDetailDTO {
 
 	return TraceDetailDTO{
 		TraceID:        trace.TraceID.String(),
+		TenantID:       trace.TenantID,
 		Spans:          spans,
 		CriticalPath:   criticalPath,
 		Services:       trace.Services,

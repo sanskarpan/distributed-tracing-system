@@ -29,12 +29,14 @@ func (h *IngestHandler) HandleNativeSpans(w http.ResponseWriter, r *http.Request
 
 	spans := make([]*model.Span, 0, len(req.Spans))
 	parseDropped := 0
+	tenantID := EffectiveTenant(PrincipalFromContext(r.Context()))
 	for _, dto := range req.Spans {
 		sp, err := dtoToSpan(dto)
 		if err != nil {
 			parseDropped++
 			continue
 		}
+		sp.TenantID = tenantID
 		spans = append(spans, sp)
 	}
 
@@ -58,6 +60,11 @@ func (h *IngestHandler) HandleOTLPTraces(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		http.Error(w, `{"error":"invalid OTLP"}`, 400)
 		return
+	}
+
+	tenantID := EffectiveTenant(PrincipalFromContext(r.Context()))
+	for _, sp := range spans {
+		sp.TenantID = tenantID
 	}
 
 	h.pipeline.IngestSpans(spans)

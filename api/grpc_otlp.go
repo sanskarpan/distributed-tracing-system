@@ -10,26 +10,41 @@ import (
 	tracev1 "go.opentelemetry.io/proto/otlp/trace/v1"
 
 	"github.com/yourname/tracing/internal/model"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // OTLPTraceServiceServer implements the OpenTelemetry OTLP gRPC TraceService.
 type OTLPTraceServiceServer struct {
 	coltracev1.UnimplementedTraceServiceServer
-	pipeline *Pipeline
+	pipeline   *Pipeline
+	authConfig AuthConfig
 }
 
 // NewOTLPTraceServiceServer creates a new gRPC trace receiver backed by the pipeline.
-func NewOTLPTraceServiceServer(pipeline *Pipeline) *OTLPTraceServiceServer {
-	return &OTLPTraceServiceServer{pipeline: pipeline}
+func NewOTLPTraceServiceServer(pipeline *Pipeline, authConfig AuthConfig) *OTLPTraceServiceServer {
+	return &OTLPTraceServiceServer{pipeline: pipeline, authConfig: authConfig}
 }
 
 // Export implements TraceServiceServer.Export.
 // It converts OTLP protobuf spans to the internal model and feeds them into the pipeline.
 func (s *OTLPTraceServiceServer) Export(
-	_ context.Context,
+	ctx context.Context,
 	req *coltracev1.ExportTraceServiceRequest,
 ) (*coltracev1.ExportTraceServiceResponse, error) {
+	principal, ok := AuthenticateGRPCPrincipal(ctx, s.authConfig)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "unauthorized")
+	}
+	if roleRank(principal.Role) < roleRank(RoleOperator) {
+		return nil, status.Error(codes.PermissionDenied, "forbidden")
+	}
+
 	spans := otlpProtoToSpans(req.GetResourceSpans())
+	tenantID := EffectiveTenant(principal)
+	for _, span := range spans {
+		span.TenantID = tenantID
+	}
 	if len(spans) > 0 {
 		s.pipeline.IngestSpans(spans)
 	}
@@ -130,4 +145,3 @@ func protoKVToModel(kv *commonv1.KeyValue) model.KeyValue {
 	}
 	return mk
 }
-

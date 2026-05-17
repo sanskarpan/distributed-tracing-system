@@ -19,6 +19,14 @@
   Trace detail including spans and analysis outputs.
 - `GET /api/v1/traces/{traceId}/export`
   Export of a trace payload.
+- `POST /api/v1/traces/import`
+  Import one or more trace payloads.
+- `DELETE /api/v1/traces/{traceId}`
+  Delete a trace.
+- `POST /api/v1/traces/archive`
+  Write a snapshot archive of the current trace set.
+- `POST /api/v1/traces/archive/restore`
+  Restore a trace archive from disk.
 - `GET /api/v1/traces/compare?base=...&compare=...`
   Structural comparison between two traces.
 
@@ -35,6 +43,11 @@
 - `GET /api/v1/metrics/anomalies`
 - `GET /api/v1/metrics/slo`
 
+### Alerting
+
+- `GET /api/v1/alerts`
+  Current active alerts derived from readiness, SLO, and anomaly signals.
+
 ### Sampler
 
 - `GET /api/v1/sampler`
@@ -50,13 +63,28 @@
 
 ## Authentication
 
-When `API_KEY` is set, protected APIs require:
+When `AUTH_TOKENS` or `API_KEY` is set, protected APIs require:
 
 ```http
-Authorization: Bearer <API_KEY>
+Authorization: Bearer <token>
 ```
 
-Public probe and metadata endpoints remain unauthenticated.
+`AUTH_TOKENS` uses the format:
+
+```text
+token|role|tenant;token|role|tenant
+```
+
+Roles:
+
+- `viewer`
+  Query, metrics, alerts, and SSE.
+- `operator`
+  Viewer permissions plus ingest and lifecycle operations.
+- `admin`
+  Operator permissions plus sampler, stats, pprof, and archive restore.
+
+Tenant-aware callers can set `X-Tenant-ID` when using a global admin token to scope requests to a specific tenant. Public probe and metadata endpoints remain unauthenticated.
 
 ## SSE Streams
 

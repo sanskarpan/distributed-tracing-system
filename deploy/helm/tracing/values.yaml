@@ -1,0 +1,35 @@
+collector:
+  image:
+    repository: ghcr.io/your-org/tracing-collector
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 4318
+  grpcPort: 4317
+  env:
+    dataDir: /var/lib/tracing
+    readinessMaxQueueUsagePct: "80"
+    enablePprof: "false"
+    authTokens: ""
+    alertWebhookUrl: ""
+    archiveDir: /var/lib/tracing/archive
+  persistence:
+    enabled: true
+    size: 5Gi
+
+web:
+  image:
+    repository: ghcr.io/your-org/tracing-web
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  host: tracing.local

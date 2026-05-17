@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { buildSSEURL } from '@/api/client'
 
 export function useSSE(url: string, onEvent: (event: unknown) => void) {
   const onEventRef = useRef(onEvent)
@@ -14,7 +15,7 @@ export function useSSE(url: string, onEvent: (event: unknown) => void) {
 
     function connect() {
       if (destroyed) return
-      es = new EventSource(url)
+      es = new EventSource(buildSSEURL(url))
 
       es.onmessage = (e: MessageEvent) => {
         try {

@@ -100,3 +100,31 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  integration:
+    name: API integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run API integration suite
+        run: go test ./api -run 'TestAPI_(RBACAndTenantIsolation|TraceLifecycleArchiveDeleteRestore|AlertWebhookReceivesActiveAlerts)$' -count=1
+
+  helm:
+    name: Helm lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+
+      - name: Lint chart
+        run: helm lint deploy/helm/tracing
+
+      - name: Render chart
+        run: helm template tracing deploy/helm/tracing > /tmp/tracing-chart.yaml

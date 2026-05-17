@@ -15,6 +15,7 @@ make demo
 go test ./...
 go test ./... -race
 go test ./... -run TestName
+make integration
 ```
 
 ### Load Testing
@@ -35,6 +36,12 @@ For authenticated environments:
 
 ```bash
 BASE_URL=http://localhost:4318 API_KEY=secret k6 run loadtests/k6/mixed-ingest-and-query.js
+```
+
+For tenant-scoped environments:
+
+```bash
+BASE_URL=http://localhost:4318 API_KEY=operator-token TENANT_ID=tenant-a k6 run loadtests/k6/collector-soak.js
 ```
 
 ### Frontend
@@ -92,3 +99,10 @@ go test ./internal/storage ./internal/metrics ./internal/sampler -run '^$' -benc
 ```
 
 Use benchmark changes to expose hot-path allocation and concurrency behavior, not just raw throughput.
+
+## Release Workflow
+
+```bash
+make helm-lint
+make release-dry-run
+```

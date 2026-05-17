@@ -9,9 +9,9 @@ import (
 // Spans with duration > the last bound go into the overflow bucket.
 var latencyBounds = []float64{5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000}
 
-const heatmapWindowSec  = 10 // seconds per time bucket
-const heatmapNumWindows = 6  // 6 × 10s = 60s of history
-const heatmapNumBands   = 11 // len(latencyBounds) + 1 overflow; kept as constant for arrays
+const heatmapWindowSec = 10 // seconds per time bucket
+const heatmapNumWindows = 6 // 6 × 10s = 60s of history
+const heatmapNumBands = 11  // len(latencyBounds) + 1 overflow; kept as constant for arrays
 
 // LatencyHeatmapBucket holds span counts per latency band for one time window.
 type LatencyHeatmapBucket struct {

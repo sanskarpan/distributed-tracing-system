@@ -18,11 +18,13 @@ export const options = {
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:4318'
 const API_KEY = __ENV.API_KEY || ''
 const SERVICE_NAME = __ENV.SERVICE_NAME || 'soak'
+const TENANT_ID = __ENV.TENANT_ID || ''
 
 function headers() {
   return {
     'Content-Type': 'application/json',
     ...(API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {}),
+    ...(TENANT_ID ? { 'X-Tenant-ID': TENANT_ID } : {}),
   }
 }
 

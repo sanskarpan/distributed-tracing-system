@@ -17,7 +17,7 @@ func NewMetricsHandler(m *metrics.MetricsStore) *MetricsHandler {
 
 // HandleREDMetrics handles GET /api/v1/metrics/red
 func (h *MetricsHandler) HandleREDMetrics(w http.ResponseWriter, r *http.Request) {
-	snapshots := h.metricsStore.Snapshot()
+	snapshots := h.metricsStore.Snapshot(EffectiveTenant(PrincipalFromContext(r.Context())))
 	writeJSON(w, map[string]any{"metrics": snapshots})
 }
 
@@ -25,8 +25,9 @@ func (h *MetricsHandler) HandleREDMetrics(w http.ResponseWriter, r *http.Request
 // Returns both span-count time-series and a 2D latency × time heatmap.
 func (h *MetricsHandler) HandleHeatmap(w http.ResponseWriter, r *http.Request) {
 	service := r.URL.Query().Get("service")
-	buckets := h.metricsStore.HeatmapData(service)
-	latency := h.metricsStore.LatencyHeatmap2D(service)
+	tenantID := EffectiveTenant(PrincipalFromContext(r.Context()))
+	buckets := h.metricsStore.HeatmapData(service, tenantID)
+	latency := h.metricsStore.LatencyHeatmap2D(service, tenantID)
 	writeJSON(w, map[string]any{
 		"resolution": "10s",
 		"buckets":    buckets,
@@ -43,7 +44,7 @@ func (h *MetricsHandler) HandleSLOs(w http.ResponseWriter, r *http.Request) {
 			target = parsed
 		}
 	}
-	results := h.metricsStore.ComputeSLOs(target)
+	results := h.metricsStore.ComputeSLOs(target, EffectiveTenant(PrincipalFromContext(r.Context())))
 	writeJSON(w, map[string]any{"slos": results, "targetErrorRate": target})
 }
 
@@ -56,6 +57,6 @@ func (h *MetricsHandler) HandleAnomalies(w http.ResponseWriter, r *http.Request)
 			z = parsed
 		}
 	}
-	results := h.metricsStore.DetectAnomalies(z)
+	results := h.metricsStore.DetectAnomalies(z, EffectiveTenant(PrincipalFromContext(r.Context())))
 	writeJSON(w, map[string]any{"anomalies": results, "zThreshold": z})
 }

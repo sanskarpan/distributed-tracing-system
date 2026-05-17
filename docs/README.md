@@ -18,6 +18,8 @@ This repository now carries a dedicated `docs/` tree for system-level and contri
   Production-readiness gaps found during the frontend audit and how they were resolved.
 - [Runbooks](./runbooks.md)
   Operational response playbooks for common collector and UI incidents.
+- [Release Guide](./release.md)
+  Artifact generation, packaging, and release automation.
 
 ## Audience
 

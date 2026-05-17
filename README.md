@@ -28,6 +28,7 @@ Detailed project documentation now lives in [`docs/`](./docs/README.md):
 - [Development Guide](./docs/development.md)
 - [Frontend Audit](./docs/frontend-audit.md)
 - [Runbooks](./docs/runbooks.md)
+- [Release Guide](./docs/release.md)
 
 ## Architecture
 
@@ -52,6 +53,8 @@ Traffic Generator ──OTLP/HTTP──► Collector (Go)
 - RED metrics (rate, error rate, P50/P95/P99) with sliding-window histograms
 - Server-Sent Events bus for live UI updates
 - In-memory store with configurable eviction (default 10k traces)
+- Static token RBAC with tenant-aware ingest/query isolation
+- Lifecycle import, archive, restore, and delete APIs for operational workflows
 
 **Frontend** (`web`) — React 18 + TypeScript + Vite:
 - **Search** — filter traces by service, operation, duration, error status, time range
@@ -73,6 +76,9 @@ Traffic Generator ──OTLP/HTTP──► Collector (Go)
 | `make loadtest` | Run the k6 ingest load script |
 | `make loadtest-mixed` | Run mixed ingest + query pressure |
 | `make soaktest` | Run the longer collector soak profile |
+| `make integration` | Run the API integration suite for auth, lifecycle, and alerting |
+| `make helm-lint` | Lint and render the Helm chart |
+| `make release-dry-run` | Run a local release packaging dry run |
 | `cd web && npm test` | Run frontend unit tests |
 | `cd web && npx tsc --noEmit` | TypeScript type check |
 
@@ -121,6 +127,8 @@ curl -X PUT http://localhost:4318/api/v1/sampler \
   Local multi-container stack with optional demo traffic and observability profile.
 - [`deploy/k8s/`](./deploy/k8s/README.md)
   Kubernetes example manifests for collector and web services.
+- [`deploy/helm/tracing/`](./deploy/helm/tracing)
+  Packaged Helm chart for Kubernetes installation.
 - [`deploy/observability/`](./deploy/observability/README.md)
   Prometheus scrape config and starter Grafana dashboard JSON.
 - [`loadtests/`](./loadtests/README.md)

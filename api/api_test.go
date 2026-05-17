@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -42,7 +43,10 @@ func testServerWithAPIKey(t *testing.T, apiKey string) *httptest.Server {
 	t.Cleanup(cancel)
 
 	r := chi.NewRouter()
-	api.SetupRoutes(ctx, r, pipeline, store, metricsStore, sseBus, apiKey)
+	authConfig := api.LoadAuthConfig(apiKey)
+	alertManager := api.NewAlertManager(metricsStore, nil)
+	lifecycleHandler := api.NewLifecycleHandler(store, analysis.NewAnalyzer())
+	api.SetupRoutes(ctx, r, pipeline, store, metricsStore, sseBus, authConfig, alertManager, lifecycleHandler)
 	return httptest.NewServer(r)
 }
 
@@ -289,6 +293,170 @@ func TestAPI_PprofEndpointRequiresAuthAndCanBeEnabled(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestAPI_RBACAndTenantIsolation(t *testing.T) {
+	t.Setenv("AUTH_TOKENS", "viewer-a|viewer|tenant-a;operator-a|operator|tenant-a;operator-b|operator|tenant-b;admin-global|admin|*")
+
+	srv := testServer(t)
+	defer srv.Close()
+
+	traceA, _, bodyA := spanBody(t)
+	traceB, _, bodyB := spanBody(t)
+
+	reqA, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/spans", bytes.NewReader(bodyA))
+	reqA.Header.Set("Authorization", "Bearer operator-a")
+	resp, err := http.DefaultClient.Do(reqA)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	reqB, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/spans", bytes.NewReader(bodyB))
+	reqB.Header.Set("Authorization", "Bearer operator-b")
+	resp, err = http.DefaultClient.Do(reqB)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	time.Sleep(120 * time.Millisecond)
+
+	viewerReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/traces", nil)
+	viewerReq.Header.Set("Authorization", "Bearer viewer-a")
+	resp, err = http.DefaultClient.Do(viewerReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var list map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&list))
+	traces := list["traces"].([]any)
+	require.Len(t, traces, 1)
+	assert.Equal(t, traceA.String(), traces[0].(map[string]any)["traceId"])
+
+	forbiddenReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/traces/"+traceB.String(), nil)
+	forbiddenReq.Header.Set("Authorization", "Bearer viewer-a")
+	resp, err = http.DefaultClient.Do(forbiddenReq)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+	samplerReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/sampler", nil)
+	samplerReq.Header.Set("Authorization", "Bearer operator-a")
+	resp, err = http.DefaultClient.Do(samplerReq)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+
+	adminReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/traces", nil)
+	adminReq.Header.Set("Authorization", "Bearer admin-global")
+	adminReq.Header.Set("X-Tenant-ID", "tenant-b")
+	resp, err = http.DefaultClient.Do(adminReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&list))
+	traces = list["traces"].([]any)
+	require.Len(t, traces, 1)
+	assert.Equal(t, traceB.String(), traces[0].(map[string]any)["traceId"])
+}
+
+func TestAPI_TraceLifecycleArchiveDeleteRestore(t *testing.T) {
+	t.Setenv("AUTH_TOKENS", "operator-a|operator|tenant-a;admin-global|admin|*")
+	archiveDir := t.TempDir()
+	t.Setenv("ARCHIVE_DIR", archiveDir)
+
+	srv := testServer(t)
+	defer srv.Close()
+
+	traceID, _, body := spanBody(t)
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/spans", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer operator-a")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	time.Sleep(120 * time.Millisecond)
+
+	archiveReq, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/traces/archive?fileName=tenant-a.json", nil)
+	archiveReq.Header.Set("Authorization", "Bearer operator-a")
+	resp, err = http.DefaultClient.Do(archiveReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	deleteReq, _ := http.NewRequest(http.MethodDelete, srv.URL+"/api/v1/traces/"+traceID.String(), nil)
+	deleteReq.Header.Set("Authorization", "Bearer operator-a")
+	resp, err = http.DefaultClient.Do(deleteReq)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	getReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/traces/"+traceID.String(), nil)
+	getReq.Header.Set("Authorization", "Bearer operator-a")
+	resp, err = http.DefaultClient.Do(getReq)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+	restoreReq, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/traces/archive/restore?fileName=tenant-a.json", nil)
+	restoreReq.Header.Set("Authorization", "Bearer admin-global")
+	restoreReq.Header.Set("X-Tenant-ID", "tenant-a")
+	resp, err = http.DefaultClient.Do(restoreReq)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	getReq, _ = http.NewRequest(http.MethodGet, srv.URL+"/api/v1/traces/"+traceID.String(), nil)
+	getReq.Header.Set("Authorization", "Bearer operator-a")
+	resp, err = http.DefaultClient.Do(getReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestAPI_AlertWebhookReceivesActiveAlerts(t *testing.T) {
+	var received atomic.Int64
+	webhook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer webhook.Close()
+
+	t.Setenv("ALERT_WEBHOOK_URL", webhook.URL)
+	t.Setenv("ALERT_EVAL_INTERVAL", "50ms")
+	t.Setenv("ALERT_COOLDOWN", "50ms")
+
+	srv := testServer(t)
+	defer srv.Close()
+
+	traceID, err := model.NewTraceID()
+	require.NoError(t, err)
+	spanID, err := model.NewSpanID()
+	require.NoError(t, err)
+	now := time.Now()
+	body, err := json.Marshal(map[string]any{
+		"spans": []map[string]any{{
+			"traceId":           traceID.String(),
+			"spanId":            spanID.String(),
+			"name":              "POST /checkout",
+			"kind":              1,
+			"serviceName":       "checkout",
+			"startTimeUnixNano": uint64(now.UnixNano()),
+			"endTimeUnixNano":   uint64(now.Add(50 * time.Millisecond).UnixNano()),
+			"attributes":        []any{},
+			"events":            []any{},
+			"links":             []any{},
+			"status":            map[string]any{"code": 2, "message": "boom"},
+		}},
+	})
+	require.NoError(t, err)
+
+	resp, err := http.Post(srv.URL+"/api/v1/spans", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	resp.Body.Close()
+
+	require.Eventually(t, func() bool {
+		return received.Load() > 0
+	}, 2*time.Second, 50*time.Millisecond)
 }
 
 // TestAPI_SamplerPutThenGet verifies that PUT /api/v1/sampler changes the sampler type.
