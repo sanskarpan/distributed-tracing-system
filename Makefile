@@ -34,7 +34,7 @@ soaktest:
 	k6 run loadtests/k6/collector-soak.js
 
 integration:
-	go test ./api -run 'TestAPI_(RBACAndTenantIsolation|TraceLifecycleArchiveDeleteRestore|AlertWebhookReceivesActiveAlerts)$$' -count=1
+	go test ./api -run 'TestAPI_(RBACAndTenantIsolation|TraceLifecycleArchiveDeleteRestore|ReplicatesNativeIngestToPeers|AlertWebhookReceivesActiveAlerts)$$' -count=1
 
 helm-lint:
 	helm lint deploy/helm/tracing
