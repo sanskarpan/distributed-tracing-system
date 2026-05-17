@@ -19,11 +19,12 @@ type OTLPTraceServiceServer struct {
 	coltracev1.UnimplementedTraceServiceServer
 	pipeline   *Pipeline
 	authConfig AuthConfig
+	replicator *Replicator
 }
 
 // NewOTLPTraceServiceServer creates a new gRPC trace receiver backed by the pipeline.
-func NewOTLPTraceServiceServer(pipeline *Pipeline, authConfig AuthConfig) *OTLPTraceServiceServer {
-	return &OTLPTraceServiceServer{pipeline: pipeline, authConfig: authConfig}
+func NewOTLPTraceServiceServer(pipeline *Pipeline, authConfig AuthConfig, replicator *Replicator) *OTLPTraceServiceServer {
+	return &OTLPTraceServiceServer{pipeline: pipeline, authConfig: authConfig, replicator: replicator}
 }
 
 // Export implements TraceServiceServer.Export.
@@ -47,6 +48,9 @@ func (s *OTLPTraceServiceServer) Export(
 	}
 	if len(spans) > 0 {
 		s.pipeline.IngestSpans(spans)
+		if s.replicator != nil {
+			s.replicator.ReplicateAsync(spans, tenantID)
+		}
 	}
 	return &coltracev1.ExportTraceServiceResponse{}, nil
 }

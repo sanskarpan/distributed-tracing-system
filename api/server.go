@@ -17,7 +17,11 @@ import (
 
 func SetupRoutes(ctx context.Context, r *chi.Mux, pipeline *Pipeline, store storage.TraceStore,
 	metricsStore *metrics.MetricsStore, sseBus *SSEBus, authConfig AuthConfig,
-	alertManager *AlertManager, lifecycle *LifecycleHandler) *ProbeState {
+	alertManager *AlertManager, lifecycle *LifecycleHandler, replicators ...*Replicator) *ProbeState {
+	var replicator *Replicator
+	if len(replicators) > 0 {
+		replicator = replicators[0]
+	}
 
 	// Wire pipeline worker pool shutdown to context
 	pipeline.StartWithContext(ctx)
@@ -38,6 +42,7 @@ func SetupRoutes(ctx context.Context, r *chi.Mux, pipeline *Pipeline, store stor
 	r.Get("/api/v1/config", HandleConfig)
 
 	ingest := NewIngestHandler(pipeline)
+	ingest.SetReplicator(replicator)
 	query := NewQueryHandler(store, pipeline)
 	metricsH := NewMetricsHandler(metricsStore)
 	samplerH := NewSamplerHandler(pipeline)
@@ -110,12 +115,20 @@ func SetupRoutes(ctx context.Context, r *chi.Mux, pipeline *Pipeline, store stor
 			admin.Get("/api/v1/stats", func(w http.ResponseWriter, r *http.Request) {
 				sampled, dropped := pipeline.Stats()
 				storeStats := store.Stats()
+				replicationStats := map[string]int64{}
+				if replicator != nil {
+					replicationStats = replicator.Stats()
+				}
 				writeJSON(w, map[string]any{
-					"sampledTotal":     sampled,
-					"droppedTotal":     dropped,
-					"workerQueueDepth": pipeline.QueueDepth(),
-					"traceCount":       storeStats.TraceCount,
-					"maxTraces":        storeStats.MaxSize,
+					"sampledTotal":         sampled,
+					"droppedTotal":         dropped,
+					"workerQueueDepth":     pipeline.QueueDepth(),
+					"traceCount":           storeStats.TraceCount,
+					"maxTraces":            storeStats.MaxSize,
+					"replicationSuccesses": replicationStats["replicationSuccesses"],
+					"replicationFailures":  replicationStats["replicationFailures"],
+					"replicationInFlight":  replicationStats["replicationInFlight"],
+					"replicationPeers":     replicationStats["replicationPeers"],
 				})
 			})
 
