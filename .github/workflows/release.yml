@@ -7,8 +7,52 @@ on:
   workflow_dispatch:
 
 jobs:
-  release:
+  validate-release:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build web bundle
+        working-directory: web
+        run: npm run build
+
+      - name: Package web bundle
+        run: tar -czf tracing-web-dist.tar.gz -C web dist
+
+      - name: Lint and validate Helm chart
+        run: |
+          helm lint deploy/helm/tracing
+          helm template tracing deploy/helm/tracing > /dev/null
+
+      - name: Validate GoReleaser config
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: check
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: validate-release
+    runs-on: ubuntu-latest
+    environment:
+      name: production-release
     permissions:
       contents: write
       packages: write
@@ -49,18 +93,6 @@ jobs:
       - name: Package web bundle
         run: tar -czf tracing-web-dist.tar.gz -C web dist
 
-      - name: Lint and validate Helm chart
-        run: |
-          helm lint deploy/helm/tracing
-          helm template tracing deploy/helm/tracing > /dev/null
-
-      - name: Validate GoReleaser config
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: "~> v2"
-          args: check
-
       - name: Package Helm chart
         run: helm package deploy/helm/tracing --destination .
 
@@ -85,11 +117,18 @@ jobs:
           tags: ghcr.io/${{ github.repository_owner }}/tracing-web:${{ github.ref_name }}
 
       - name: Promote stable web image to latest
-        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+        if: "!contains(github.ref_name, '-')"
         run: |
           docker buildx imagetools create \
             -t ghcr.io/${{ github.repository_owner }}/tracing-web:latest \
             ghcr.io/${{ github.repository_owner }}/tracing-web:${{ github.ref_name }}
+
+      - name: Promote stable collector image to latest
+        if: "!contains(github.ref_name, '-')"
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/${{ github.repository_owner }}/tracing-collector:latest \
+            ghcr.io/${{ github.repository_owner }}/tracing-collector:${{ github.ref_name }}
 
       - name: Attach web bundle and chart
         uses: softprops/action-gh-release@v2
