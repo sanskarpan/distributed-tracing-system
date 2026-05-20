@@ -75,15 +75,21 @@ jobs:
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
 
       - name: Build and push web image
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: docker/build-push-action@v6
         with:
           context: ./web
           file: ./web/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: |
+          tags: ghcr.io/${{ github.repository_owner }}/tracing-web:${{ github.ref_name }}
+
+      - name: Promote stable web image to latest
+        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/${{ github.repository_owner }}/tracing-web:latest \
             ghcr.io/${{ github.repository_owner }}/tracing-web:${{ github.ref_name }}
-            ghcr.io/${{ github.repository_owner }}/tracing-web:latest
 
       - name: Attach web bundle and chart
         uses: softprops/action-gh-release@v2
