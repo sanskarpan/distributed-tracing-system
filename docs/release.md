@@ -15,10 +15,13 @@ CI release automation is defined in [`.github/workflows/release.yml`](../.github
 Tagging `v*` triggers:
 1. Helm chart lint + template render validation
 2. GoReleaser config sanity check
-3. Collector multi-platform binary builds + GitHub release publication
-4. Collector multi-arch Docker image build + push to GHCR
-5. Web multi-arch Docker image build + push to GHCR
-6. Web bundle (`tracing-web-dist.tar.gz`) + Helm chart (`.tgz`) attached to the GitHub release
+3. Explicit GitHub Actions `production-release` environment approval gate before publication
+4. Collector multi-platform binary builds + GitHub release publication
+5. Collector and web multi-arch Docker image build + push to GHCR
+6. Stable `latest` tags are promoted only after versioned images have been published
+7. Web bundle (`tracing-web-dist.tar.gz`) + Helm chart (`.tgz`) attached to the GitHub release
+
+Manual `workflow_dispatch` runs are validation-only and do not publish release artifacts.
 
 ## Installing with Helm
 
