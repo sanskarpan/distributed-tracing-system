@@ -24,6 +24,7 @@ checksum:
 
 dockers:
   - id: collector-amd64
+    ids: [collector]
     goos: linux
     goarch: amd64
     image_templates:
@@ -33,6 +34,7 @@ dockers:
     build_flag_templates:
       - "--platform=linux/amd64"
   - id: collector-arm64
+    ids: [collector]
     goos: linux
     goarch: arm64
     image_templates:
@@ -51,3 +53,4 @@ docker_manifests:
     image_templates:
       - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/tracing-collector:{{ .Version }}-amd64"
       - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/tracing-collector:{{ .Version }}-arm64"
+    skip_push: auto

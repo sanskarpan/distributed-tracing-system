@@ -22,21 +22,23 @@ Tagging `v*` triggers:
 
 ## Installing with Helm
 
+Use release tags with the `v` prefix, for example `v1.0.0`.
+
 ```bash
 # Download the chart from the GitHub release
-helm install tracing tracing-<version>.tgz \
-  --set collector.image.tag=<version> \
-  --set web.image.tag=<version>
+helm install tracing tracing-v1.0.0.tgz \
+  --set collector.image.tag=v1.0.0 \
+  --set web.image.tag=v1.0.0
 ```
 
 Override the image org if you've pushed to your own registry:
 
 ```bash
-helm install tracing tracing-<version>.tgz \
+helm install tracing tracing-v1.0.0.tgz \
   --set collector.image.repository=ghcr.io/<your-org>/tracing-collector \
-  --set collector.image.tag=<version> \
+  --set collector.image.tag=v1.0.0 \
   --set web.image.repository=ghcr.io/<your-org>/tracing-web \
-  --set web.image.tag=<version>
+  --set web.image.tag=v1.0.0
 ```
 
 ## Local Validation
