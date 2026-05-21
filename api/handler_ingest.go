@@ -15,12 +15,8 @@ type IngestHandler struct {
 	replicator *Replicator
 }
 
-func NewIngestHandler(pipeline *Pipeline) *IngestHandler {
-	return &IngestHandler{pipeline: pipeline}
-}
-
-func (h *IngestHandler) SetReplicator(replicator *Replicator) {
-	h.replicator = replicator
+func NewIngestHandler(pipeline *Pipeline, replicator *Replicator) *IngestHandler {
+	return &IngestHandler{pipeline: pipeline, replicator: replicator}
 }
 
 // HandleNativeSpans handles POST /api/v1/spans

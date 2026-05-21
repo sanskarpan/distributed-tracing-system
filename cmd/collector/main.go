@@ -67,7 +67,7 @@ func main() {
 	}()
 
 	r := chi.NewRouter()
-	probes := api.SetupRoutes(ctx, r, pipeline, store, metricsStore, sseBus, authConfig, alertManager, lifecycleHandler, replicator)
+	probes := api.SetupRoutes(ctx, r, pipeline, store, metricsStore, sseBus, authConfig, replicator, alertManager, lifecycleHandler)
 
 	addr := ":4318"
 	if a := os.Getenv("LISTEN_ADDR"); a != "" {

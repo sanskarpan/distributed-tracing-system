@@ -17,11 +17,7 @@ import (
 
 func SetupRoutes(ctx context.Context, r *chi.Mux, pipeline *Pipeline, store storage.TraceStore,
 	metricsStore *metrics.MetricsStore, sseBus *SSEBus, authConfig AuthConfig,
-	alertManager *AlertManager, lifecycle *LifecycleHandler, replicators ...*Replicator) *ProbeState {
-	var replicator *Replicator
-	if len(replicators) > 0 {
-		replicator = replicators[0]
-	}
+	replicator *Replicator, alertManager *AlertManager, lifecycle *LifecycleHandler) *ProbeState {
 
 	// Wire pipeline worker pool shutdown to context
 	pipeline.StartWithContext(ctx)
@@ -41,8 +37,7 @@ func SetupRoutes(ctx context.Context, r *chi.Mux, pipeline *Pipeline, store stor
 	r.Get("/metrics", NewPrometheusHandler(metricsStore, pipeline).ServeHTTP)
 	r.Get("/api/v1/config", HandleConfig)
 
-	ingest := NewIngestHandler(pipeline)
-	ingest.SetReplicator(replicator)
+	ingest := NewIngestHandler(pipeline, replicator)
 	query := NewQueryHandler(store, pipeline)
 	metricsH := NewMetricsHandler(metricsStore)
 	samplerH := NewSamplerHandler(pipeline)

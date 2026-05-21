@@ -29,7 +29,7 @@ func newFuzzServer() (srv *httptest.Server, cancel context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 	alertManager := api.NewAlertManager(ms, nil)
 	lifecycleHandler := api.NewLifecycleHandler(store, analysis.NewAnalyzer())
-	api.SetupRoutes(ctx, r, pipeline, store, ms, bus, api.LoadAuthConfig(""), alertManager, lifecycleHandler)
+	api.SetupRoutes(ctx, r, pipeline, store, ms, bus, api.LoadAuthConfig(""), nil, alertManager, lifecycleHandler)
 	return httptest.NewServer(r), cancel
 }
 

@@ -48,7 +48,7 @@ func testServerWithAPIKey(t *testing.T, apiKey string) *httptest.Server {
 	replicator := api.NewReplicatorFromEnv()
 	alertManager := api.NewAlertManager(metricsStore, nil)
 	lifecycleHandler := api.NewLifecycleHandler(store, analysis.NewAnalyzer())
-	api.SetupRoutes(ctx, r, pipeline, store, metricsStore, sseBus, authConfig, alertManager, lifecycleHandler, replicator)
+	api.SetupRoutes(ctx, r, pipeline, store, metricsStore, sseBus, authConfig, replicator, alertManager, lifecycleHandler)
 	return httptest.NewServer(r)
 }
 
